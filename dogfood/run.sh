@@ -12,13 +12,13 @@ export EVOLVER_WORKSPACE_ID="$WSID"
 PASS=0
 FAIL=0
 check() {
-  if eval "$2"; then
-    echo "  PASS: $1"
-    PASS=$((PASS + 1))
-  else
-    echo "  FAIL: $1"
-    FAIL=$((FAIL + 1))
-  fi
+	if eval "$2"; then
+		echo "  PASS: $1"
+		PASS=$((PASS + 1))
+	else
+		echo "  FAIL: $1"
+		FAIL=$((FAIL + 1))
+	fi
 }
 
 echo "== start mock server =="
@@ -61,10 +61,13 @@ check "recorded outcome sourced from hook:session-end (count=$HOOK_COUNT > 1)" "
 
 echo
 echo "== result: $PASS passed, $FAIL failed =="
-echo "----- mock server log -----"; cat /tmp/mock.log 2>/dev/null || true
+echo "----- mock server log -----"
+cat /tmp/mock.log 2>/dev/null || true
 if [ "$FAIL" -gt 0 ]; then
-  echo "----- pi stderr (tail) -----"; tail -30 /tmp/err.log 2>/dev/null || true
-  echo "----- last recorded outcome -----"; tail -1 "$EVOLVER_GRAPH" 2>/dev/null || true
+	echo "----- pi stderr (tail) -----"
+	tail -30 /tmp/err.log 2>/dev/null || true
+	echo "----- last recorded outcome -----"
+	tail -1 "$EVOLVER_GRAPH" 2>/dev/null || true
 fi
 kill "$MOCK_PID" 2>/dev/null || true
 exit "$FAIL"
