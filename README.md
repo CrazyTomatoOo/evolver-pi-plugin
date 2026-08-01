@@ -45,12 +45,13 @@ work immediately. **No account, no key, no network.**
 ## Status
 
 - ✅ **Local core** — the three automatic behaviors, workspace-scoped memory,
-  and the skill. (This branch.)
-- ⏳ **Network layer** — the seven EvoMap Proxy mailbox tools
+  and the skill.
+- ✅ **Network layer** — the seven EvoMap Proxy mailbox tools
   (`evolver_status`, `evolver_search_assets`, `evolver_fetch_asset`,
   `evolver_report_reuse`, `evolver_publish_asset`, `evolver_distill_conversation`,
   `evolver_poll`) as native `pi.registerTool` tools, plus the `/evolver:*`
-  commands. Tracked on the [wayfinder map](../../issues/1).
+  commands. Degrades gracefully when the Proxy is down.
+- ⏳ **npm publishing** — `pi install npm:` once a consumer needs it.
 
 ## Environment variables
 

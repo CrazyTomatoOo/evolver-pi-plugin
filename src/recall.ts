@@ -16,162 +16,161 @@ const CLAIM_TTL_MS = 12 * 60 * 60 * 1000; // throttle the pending-claim nudge
 const THROTTLE_PRUNE_MS = 24 * 60 * 60 * 1000;
 
 const NONGIT_NOTICE =
-  "[Evolver] This folder is not a git repository, so evolution memory is " +
-  "inactive (outcomes are derived from git diffs). Run `git init` here, or " +
-  "open a git project, to enable recall and recording.";
+	"[Evolver] This folder is not a git repository, so evolution memory is " +
+	"inactive (outcomes are derived from git diffs). Run `git init` here, or " +
+	"open a git project, to enable recall and recording.";
 
 const CLAIM_NOTICE = (url: string): string =>
-  "[Evolver] Your local node is not connected to the EvoMap network " +
-  "yet. To finish connecting, open " +
-  url +
-  " while signed in to evomap.ai — that is the only step, with no id " +
-  "or secret to enter. Local evolution memory already works without " +
-  "this; connecting only adds the network gene/capsule tools.";
+	"[Evolver] Your local node is not connected to the EvoMap network " +
+	"yet. To finish connecting, open " +
+	url +
+	" while signed in to evomap.ai — that is the only step, with no id " +
+	"or secret to enter. Local evolution memory already works without " +
+	"this; connecting only adds the network gene/capsule tools.";
 
 /** Lightweight throttle backed by a small JSON map of key -> last-fired epoch.
  * Returns true when `key` fired within `ttlMs` (caller should suppress).
  * Otherwise records "now" and returns false. Fails open (false) on error. */
 function throttled(key: string, ttlMs: number): boolean {
-  try {
-    const base =
-      process.env.EVOLVER_SESSION_STATE_DIR ||
-      path.join(os.homedir(), ".evolver");
-    const stateFile = path.join(base, "session-start-state.json");
+	try {
+		const base =
+			process.env.EVOLVER_SESSION_STATE_DIR ||
+			path.join(os.homedir(), ".evolver");
+		const stateFile = path.join(base, "session-start-state.json");
 
-    let state: Record<string, number> = {};
-    try {
-      const parsed = JSON.parse(fs.readFileSync(stateFile, "utf8"));
-      if (parsed && typeof parsed === "object") {
-        state = parsed as Record<string, number>;
-      }
-    } catch (_err) {
-      state = {};
-    }
+		let state: Record<string, number> = {};
+		try {
+			const parsed = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+			if (parsed && typeof parsed === "object") {
+				state = parsed as Record<string, number>;
+			}
+		} catch (_err) {
+			state = {};
+		}
 
-    const now = Date.now();
-    const last = state[key];
-    if (typeof last === "number" && now - last < ttlMs) {
-      return true; // recently fired -> suppress
-    }
+		const now = Date.now();
+		const last = state[key];
+		if (typeof last === "number" && now - last < ttlMs) {
+			return true; // recently fired -> suppress
+		}
 
-    state[key] = now;
-    for (const k of Object.keys(state)) {
-      if (typeof state[k] !== "number" || now - state[k] > THROTTLE_PRUNE_MS) {
-        delete state[k];
-      }
-    }
+		state[key] = now;
+		for (const k of Object.keys(state)) {
+			if (typeof state[k] !== "number" || now - state[k] > THROTTLE_PRUNE_MS) {
+				delete state[k];
+			}
+		}
 
-    try {
-      fs.mkdirSync(base, { recursive: true });
-      fs.writeFileSync(stateFile, JSON.stringify(state));
-    } catch (_err) {
-      // best effort
-    }
-    return false;
-  } catch (_err) {
-    return false; // fail open
-  }
+		try {
+			fs.mkdirSync(base, { recursive: true });
+			fs.writeFileSync(stateFile, JSON.stringify(state));
+		} catch (_err) {
+			// best effort
+		}
+		return false;
+	} catch (_err) {
+		return false; // fail open
+	}
 }
 
 /** Read a pending claim URL left by the engine at `~/.evomap/claim_url`.
  * Returns the trimmed url if it looks like an http(s) link, else null. Fails
  * closed (null) — the nudge is optional. */
 function readPendingClaimUrl(): string | null {
-  try {
-    const file = path.join(os.homedir(), ".evomap", "claim_url");
-    const url = fs.readFileSync(file, "utf8").trim();
-    if (/^https?:\/\//.test(url)) {
-      return url;
-    }
-    return null;
-  } catch (_err) {
-    return null;
-  }
+	try {
+		const file = path.join(os.homedir(), ".evomap", "claim_url");
+		const url = fs.readFileSync(file, "utf8").trim();
+		if (/^https?:\/\//.test(url)) {
+			return url;
+		}
+		return null;
+	} catch (_err) {
+		return null;
+	}
 }
 
 /** Format the human-readable outcome summary block from filtered entries. */
 function formatSummary(outcomes: OutcomeEntry[]): string {
-  const successes = outcomes.filter(
-    (o) => o.outcome && o.outcome.status === "success",
-  ).length;
-  const failures = outcomes.filter(
-    (o) => o.outcome && o.outcome.status === "failed",
-  ).length;
+	const successes = outcomes.filter(
+		(o) => o.outcome && o.outcome.status === "success",
+	).length;
+	const failures = outcomes.filter(
+		(o) => o.outcome && o.outcome.status === "failed",
+	).length;
 
-  const header =
-    `[Evolution Memory] Recent ${outcomes.length} outcomes ` +
-    `(${successes} success, ${failures} failed):`;
+	const header =
+		`[Evolution Memory] Recent ${outcomes.length} outcomes ` +
+		`(${successes} success, ${failures} failed):`;
 
-  const rows = outcomes.map((entry) => {
-    const outcome = entry.outcome || {};
-    let icon = "?";
-    if (outcome.status === "success") {
-      icon = "+";
-    } else if (outcome.status === "failed") {
-      icon = "-";
-    }
-    const date =
-      typeof entry.timestamp === "string"
-        ? entry.timestamp.slice(0, 10)
-        : "??????????";
-    const score =
-      typeof outcome.score === "number" ? outcome.score : "?";
-    const signals = Array.isArray(entry.signals)
-      ? entry.signals.slice(0, 3).join(", ")
-      : "";
-    const note = typeof outcome.note === "string" ? outcome.note : "";
-    const line = `[${icon}] ${date} score=${score} signals=[${signals}] ${note}`;
-    return line.length > LINE_MAX ? line.slice(0, LINE_MAX) : line;
-  });
+	const rows = outcomes.map((entry) => {
+		const outcome = entry.outcome || {};
+		let icon = "?";
+		if (outcome.status === "success") {
+			icon = "+";
+		} else if (outcome.status === "failed") {
+			icon = "-";
+		}
+		const date =
+			typeof entry.timestamp === "string"
+				? entry.timestamp.slice(0, 10)
+				: "??????????";
+		const score = typeof outcome.score === "number" ? outcome.score : "?";
+		const signals = Array.isArray(entry.signals)
+			? entry.signals.slice(0, 3).join(", ")
+			: "";
+		const note = typeof outcome.note === "string" ? outcome.note : "";
+		const line = `[${icon}] ${date} score=${score} signals=[${signals}] ${note}`;
+		return line.length > LINE_MAX ? line.slice(0, LINE_MAX) : line;
+	});
 
-  return (
-    [header, ...rows].join("\n") +
-    "\n\nUse successful approaches. Avoid repeating failed patterns."
-  );
+	return (
+		[header, ...rows].join("\n") +
+		"\n\nUse successful approaches. Avoid repeating failed patterns."
+	);
 }
 
 /** Build the recall text for `projectDir`, or null when there is nothing worth
  * injecting. Never throws. */
 export function buildRecallText(projectDir: string): string | null {
-  const parts: string[] = [];
-  const currentDir = projectDir;
+	const parts: string[] = [];
+	const currentDir = projectDir;
 
-  // 1. Non-git notice (throttled per directory).
-  try {
-    if (!isGitWorkspace(currentDir)) {
-      if (!throttled(`nongit:${currentDir}`, NONGIT_TTL_MS)) {
-        parts.push(NONGIT_NOTICE);
-      }
-    }
-  } catch (_err) {
-    // ignore — notice is optional
-  }
+	// 1. Non-git notice (throttled per directory).
+	try {
+		if (!isGitWorkspace(currentDir)) {
+			if (!throttled(`nongit:${currentDir}`, NONGIT_TTL_MS)) {
+				parts.push(NONGIT_NOTICE);
+			}
+		}
+	} catch (_err) {
+		// ignore — notice is optional
+	}
 
-  // 1b. Pending-claim nudge (throttled per claim url).
-  try {
-    const claimUrl = readPendingClaimUrl();
-    if (claimUrl && !throttled(`claim:${claimUrl}`, CLAIM_TTL_MS)) {
-      parts.push(CLAIM_NOTICE(claimUrl));
-    }
-  } catch (_err) {
-    // ignore — nudge is optional
-  }
+	// 1b. Pending-claim nudge (throttled per claim url).
+	try {
+		const claimUrl = readPendingClaimUrl();
+		if (claimUrl && !throttled(`claim:${claimUrl}`, CLAIM_TTL_MS)) {
+			parts.push(CLAIM_NOTICE(claimUrl));
+		}
+	} catch (_err) {
+		// ignore — nudge is optional
+	}
 
-  // 2. Workspace-scoped evolution memory.
-  try {
-    const graphPath = findMemoryGraph(currentDir);
-    const currentId = resolveWorkspaceId(currentDir);
-    const candidates = gatherWorkspaceEntries(graphPath, currentId, currentDir);
-    const relevant = filterRelevant(candidates);
-    if (relevant.length > 0) {
-      parts.push(formatSummary(relevant));
-    }
-  } catch (_err) {
-    // ignore — memory injection is optional
-  }
+	// 2. Workspace-scoped evolution memory.
+	try {
+		const graphPath = findMemoryGraph(currentDir);
+		const currentId = resolveWorkspaceId(currentDir);
+		const candidates = gatherWorkspaceEntries(graphPath, currentId, currentDir);
+		const relevant = filterRelevant(candidates);
+		if (relevant.length > 0) {
+			parts.push(formatSummary(relevant));
+		}
+	} catch (_err) {
+		// ignore — memory injection is optional
+	}
 
-  if (parts.length === 0) {
-    return null;
-  }
-  return parts.join("\n\n");
+	if (parts.length === 0) {
+		return null;
+	}
+	return parts.join("\n\n");
 }
