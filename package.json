@@ -1,0 +1,22 @@
+{
+  "name": "evolver-pi-plugin",
+  "version": "0.1.0",
+  "description": "Evolver — agent self-evolving engine for pi. Persistent, auditable evolution memory interoperable with the EvoMap ecosystem.",
+  "license": "MIT",
+  "keywords": ["pi", "pi-package", "evolver", "evomap", "gep", "evolution-memory"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CrazyTomatoOo/evolver-pi-plugin.git"
+  },
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@types/node": "^22",
+    "typescript": "^5"
+  }
+}

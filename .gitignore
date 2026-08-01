@@ -1,0 +1,5 @@
+node_modules/
+*.log
+.evolver/
+memory/evolution/
+.DS_Store
