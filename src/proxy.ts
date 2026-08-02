@@ -106,9 +106,11 @@ export async function proxyFetch(
 				hint = token
 					? " The Proxy token in ~/.evolver/settings.json looks stale (the Proxy mints a fresh token on restart). Restart the pi session so the bridge re-reads it, or run /evolver:status."
 					: ` No Proxy token found in ~/.evolver/settings.json and the request was rejected — another process may be using ${base}. Start the Proxy (run \`evolver\` once in a git repo) or set EVOMAP_PROXY_PORT, then run /evolver:status.`;
-			} else if (res.status === 404) {
-				hint = ` Endpoint not found at ${base} — it may not be the Evolver Proxy. Confirm with /evolver:status.`;
-			}
+		} else if (res.status === 404) {
+			hint = ` Endpoint not found at ${base} — it may not be the Evolver Proxy. Confirm with /evolver:status.`;
+		} else if (res.status === 402) {
+			hint = " Network features require EvoMap credits — buy or subscribe at https://evomap.ai/pricing. Local evolution memory keeps working as usual.";
+		}
 			return {
 				ok: false,
 				error: `Proxy at ${base} returned HTTP ${res.status}: ${
