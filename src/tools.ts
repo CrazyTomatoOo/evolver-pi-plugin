@@ -33,7 +33,7 @@ export function registerTools(pi: ExtensionAPI): void {
 		label: "Evolver status",
 		description:
 			"Get the EvoMap Proxy status: running state, node_id, pending inbound/outbound message counts, and last Hub sync time. Use this first to confirm the Proxy is up.",
-		parameters: Type.Object({}),
+		parameters: Type.Object({}, { additionalProperties: false }),
 		async execute() {
 			return asResult(await proxyFetch("GET", "/proxy/status"));
 		},
@@ -54,17 +54,19 @@ export function registerTools(pi: ExtensionAPI): void {
 			signals: SIGNALS,
 			mode: Type.Optional(
 				Type.Union([Type.Literal("semantic"), Type.Literal("exact")], {
-					description: "Search mode. Defaults to semantic.",
+				description: "Search mode. Defaults to semantic.",
+				default: "semantic",
 				}),
 			),
 			limit: Type.Optional(
 				Type.Integer({
 					minimum: 1,
 					maximum: 25,
-					description: "Defaults to 5.",
+				description: "Defaults to 5.",
+				default: 5,
 				}),
 			),
-		}),
+		}, { additionalProperties: false }),
 		async execute(_id, params) {
 			return asResult(
 				await proxyFetch("POST", "/asset/search", {
@@ -84,7 +86,7 @@ export function registerTools(pi: ExtensionAPI): void {
 			'Fetch the full content of one or more evolution assets by their IDs (e.g. "sha256:abc..."), as returned by evolver_search_assets. After you actually reuse any of these in your work, call evolver_report_reuse with their IDs so the original author gets credit.',
 		parameters: Type.Object({
 			asset_ids: Type.Array(Type.String(), { minItems: 1 }),
-		}),
+		}, { additionalProperties: false }),
 		async execute(_id, params) {
 			const res = await proxyFetch("POST", "/asset/fetch", {
 				asset_ids: params.asset_ids,
@@ -124,7 +126,7 @@ export function registerTools(pi: ExtensionAPI): void {
 				}),
 			),
 			signals: SIGNALS,
-		}),
+		}, { additionalProperties: false }),
 		async execute(_id, params) {
 			return asResult(
 				await proxyFetch("POST", "/asset/report-reuse", {
@@ -148,10 +150,10 @@ export function registerTools(pi: ExtensionAPI): void {
 					content: Type.String(),
 					summary: Type.Optional(Type.String()),
 					signals: Type.Optional(Type.Array(Type.String())),
-				}),
+			}, { additionalProperties: false }),
 				{ minItems: 1 },
 			),
-		}),
+		}, { additionalProperties: false }),
 		async execute(_id, params) {
 			return asResult(
 				await proxyFetch("POST", "/asset/submit", { assets: params.assets }),
@@ -170,7 +172,7 @@ export function registerTools(pi: ExtensionAPI): void {
 					"Concrete reusable lesson or capability distilled from the conversation.",
 			}),
 			title: Type.Optional(Type.String()),
-			platform: Type.Optional(Type.String({ description: "Defaults to pi." })),
+		platform: Type.Optional(Type.String({ description: "Defaults to pi.", default: "pi" })),
 			thread_id: Type.Optional(Type.String()),
 			user_prompt: Type.Optional(Type.String()),
 			assistant_summary: Type.Optional(Type.String()),
@@ -180,19 +182,20 @@ export function registerTools(pi: ExtensionAPI): void {
 			artifacts: Type.Optional(Type.Array(Type.String())),
 			validation: Type.Optional(Type.Array(Type.String())),
 			persist: Type.Optional(
-				Type.Boolean({ description: "Defaults to true." }),
+			Type.Boolean({ description: "Defaults to true.", default: true }),
 			),
 			publish: Type.Optional(
-				Type.Boolean({ description: "Defaults to true." }),
+			Type.Boolean({ description: "Defaults to true.", default: true }),
 			),
 			min_score: Type.Optional(
 				Type.Integer({
 					minimum: 1,
 					maximum: 10,
-					description: "Defaults to 5.",
+				description: "Defaults to 5.",
+				default: 5,
 				}),
 			),
-		}),
+		}, { additionalProperties: false }),
 		async execute(_id, params) {
 			return asResult(
 				await proxyFetch("POST", "/conversation/distill", {
@@ -218,10 +221,11 @@ export function registerTools(pi: ExtensionAPI): void {
 				Type.Integer({
 					minimum: 1,
 					maximum: 50,
-					description: "Defaults to 10.",
+				description: "Defaults to 10.",
+				default: 10,
 				}),
 			),
-		}),
+		}, { additionalProperties: false }),
 		async execute(_id, params) {
 			return asResult(
 				await proxyFetch("POST", "/mailbox/poll", {
