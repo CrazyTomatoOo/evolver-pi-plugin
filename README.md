@@ -90,10 +90,9 @@ down — local memory keeps working regardless.
 
 ## Requirements
 
-- **Node.js ≥ 22** — the extension and tools are Node; the bridge uses global `fetch`.
+- **Node.js ≥ 22** — the extension and tools are Node; the bridge connects directly to the loopback Proxy so global `http_proxy` settings cannot intercept it.
 - **Git** — outcomes are derived from the project's git diff.
-- For the network tools: the EvoMap **Proxy** running locally (it starts when you
-  run the `@evomap/evolver` CLI once in a git repo). The hooks need none of this.
+- For the network tools: start the EvoMap **Proxy** locally with `evolver proxy` in a separate terminal. The hooks need none of this.
 
 ## Status
 
@@ -114,7 +113,8 @@ down — local memory keeps working regardless.
 | `EVOLVER_WORKSPACE_ID` | (auto) | Override the workspace scoping id. |
 | `EVOLVER_SESSION_STATE_DIR` | `~/.evolver` | Where throttle/dedupe state lives. |
 | `EVOLVER_HOOK_LOG_DIR` | `~/.evolver/logs` | Where the evolution breadcrumb log lives. |
-| `EVOMAP_PROXY_PORT` | `19820` | Proxy port fallback (live url is read from `~/.evolver/settings.json`). |
+| `EVOLVER_PROXY_SETTINGS_FILE` | `~/.evolver/settings.json` | Proxy URL/token settings file written by `evolver proxy`. |
+| `EVOMAP_PROXY_PORT` | `19820` | Proxy port fallback when no settings file is available. |
 | `EVOMAP_HUB_URL` / `EVOMAP_API_KEY` / `EVOMAP_NODE_ID` | (unset) | Enable Hub recording from the session-end recorder. |
 
 ## Development

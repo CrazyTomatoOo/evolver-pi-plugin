@@ -141,7 +141,8 @@ async function statusCommand(
 		);
 	} else {
 		lines.push(
-			"• Proxy: down — starts when you run `evolver` once in a git repo. Local memory works regardless.",
+			`• Proxy: unavailable — ${status.error ?? "unknown error"}\n` +
+				"  Start it with `evolver proxy` in a separate terminal. Local memory works regardless.",
 		);
 	}
 	try {

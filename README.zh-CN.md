@@ -84,10 +84,9 @@ pi install git:github.com/CrazyTomatoOo/evolver-pi-plugin
 
 ## 运行要求
 
-- **Node.js ≥ 22**——扩展与工具是 Node；网桥使用全局 `fetch`。
+- **Node.js ≥ 22**——扩展与工具是 Node；网桥会直接连接回环 Proxy，因此全局 `http_proxy` 不会拦截它。
 - **Git**——结果由项目的 git diff 推导。
-- 网络工具需要：本地运行的 EvoMap **Proxy**（在 git 仓库里运行一次
-  `@evomap/evolver` CLI 即会启动）。hook 不需要这些。
+- 网络工具需要：在独立终端中用 `evolver proxy` 启动本地 EvoMap **Proxy**。hook 不需要这些。
 
 ## 状态
 
@@ -107,7 +106,8 @@ pi install git:github.com/CrazyTomatoOo/evolver-pi-plugin
 | `EVOLVER_WORKSPACE_ID` | （自动） | 覆盖工作区隔离 id。 |
 | `EVOLVER_SESSION_STATE_DIR` | `~/.evolver` | 节流/去重状态存放处。 |
 | `EVOLVER_HOOK_LOG_DIR` | `~/.evolver/logs` | 进化面包屑日志存放处。 |
-| `EVOMAP_PROXY_PORT` | `19820` | Proxy 端口兜底（实际 url 从 `~/.evolver/settings.json` 读取）。 |
+| `EVOLVER_PROXY_SETTINGS_FILE` | `~/.evolver/settings.json` | 由 `evolver proxy` 写入的 Proxy URL/token 设置文件。 |
+| `EVOMAP_PROXY_PORT` | `19820` | 没有可用设置文件时的 Proxy 端口兜底。
 | `EVOMAP_HUB_URL` / `EVOMAP_API_KEY` / `EVOMAP_NODE_ID` | （未设置） | 启用 session-end 记录器的 Hub 上报。 |
 
 ## 开发
