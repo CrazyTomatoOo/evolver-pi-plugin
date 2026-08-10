@@ -5,7 +5,6 @@
 
 import assert from "node:assert";
 import fs from "node:fs";
-import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { execSync } from "node:child_process";
@@ -15,7 +14,6 @@ import { resolveWorkspaceId } from "../src/paths";
 import { appendEntry, gatherWorkspaceEntries } from "../src/memory";
 import { buildRecallText } from "../src/recall";
 import { recordOutcome } from "../src/record";
-import { proxyFetch, readProxySettings } from "../src/proxy";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "evolver-selfcheck-"));
 // Keep all state in the temp sandbox, away from the real ~/.evolver.
@@ -170,83 +168,6 @@ async function main() {
 			delete process.env.MEMORY_GRAPH_PATH;
 		},
 	);
-
-
-	await check("readProxySettings yields a loopback url + token shape", () => {
-		const s = readProxySettings();
-		assert.ok(/^https?:\/\//.test(s.url), `url=${s.url}`);
-		assert.ok(s.token === null || typeof s.token === "string");
-	});
-	await check("proxyFetch bypasses global http_proxy for loopback", async () => {
-		const received: { path?: string; authorization?: string; body?: string } = {};
-		const server = createServer((req, res) => {
-			received.path = req.url;
-			received.authorization = req.headers.authorization;
-			let body = "";
-			req.setEncoding("utf8");
-			req.on("data", (chunk: string) => {
-				body += chunk;
-			});
-			req.on("end", () => {
-				received.body = body;
-				res.setHeader("Content-Type", "application/json");
-				res.end(JSON.stringify({ node_id: "test-node" }));
-			});
-		});
-		await new Promise<void>((resolve, reject) => {
-			server.once("error", reject);
-			server.listen(0, "127.0.0.1", () => {
-				server.off("error", reject);
-				resolve();
-			});
-		});
-		const address = server.address();
-		assert.ok(address && typeof address !== "string");
-		const settings = path.join(tmp, "proxy-settings.json");
-		fs.writeFileSync(
-			settings,
-			JSON.stringify({
-				proxy: { url: `http://127.0.0.1:${address.port}`, token: "test-token" },
-			}),
-		);
-		const prevSettings = process.env.EVOLVER_PROXY_SETTINGS_FILE;
-		const prevHttpProxy = process.env.http_proxy;
-		process.env.EVOLVER_PROXY_SETTINGS_FILE = settings;
-		process.env.http_proxy = "http://127.0.0.1:1";
-		try {
-			const result = await proxyFetch("POST", "/asset/search", { query: "test" });
-			assert.deepStrictEqual(result, { ok: true, data: { node_id: "test-node" } });
-			assert.strictEqual(received.path, "/asset/search");
-			assert.strictEqual(received.authorization, "Bearer test-token");
-			assert.strictEqual(received.body, '{"query":"test"}');
-		} finally {
-			if (prevSettings === undefined) delete process.env.EVOLVER_PROXY_SETTINGS_FILE;
-			else process.env.EVOLVER_PROXY_SETTINGS_FILE = prevSettings;
-			if (prevHttpProxy === undefined) delete process.env.http_proxy;
-			else process.env.http_proxy = prevHttpProxy;
-			await new Promise<void>((resolve, reject) =>
-				server.close((err) => (err ? reject(err) : resolve())),
-			);
-		}
-	});
-
-	await check("proxyFetch degrades gracefully (never throws) when Proxy unreachable", async () => {
-		const prevPort = process.env.EVOMAP_PROXY_PORT;
-		const prevSettings = process.env.EVOLVER_PROXY_SETTINGS_FILE;
-		process.env.EVOMAP_PROXY_PORT = "1"; // closed port -> connection fails fast
-		process.env.EVOLVER_PROXY_SETTINGS_FILE = path.join(tmp, "missing-settings.json");
-		try {
-			const res = await proxyFetch("GET", "/proxy/status");
-			assert.strictEqual(res.ok, false);
-			assert.ok(typeof res.error === "string" && res.error.length > 0);
-			assert.ok(/proxy/i.test(res.error), `error should mention Proxy: ${res.error}`);
-		} finally {
-			if (prevPort === undefined) delete process.env.EVOMAP_PROXY_PORT;
-			else process.env.EVOMAP_PROXY_PORT = prevPort;
-			if (prevSettings === undefined) delete process.env.EVOLVER_PROXY_SETTINGS_FILE;
-			else process.env.EVOLVER_PROXY_SETTINGS_FILE = prevSettings;
-		}
-	});
 
 	console.log(`\n${passed} checks passed.`);
 }

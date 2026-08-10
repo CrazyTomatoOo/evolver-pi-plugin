@@ -11,9 +11,7 @@
   "pi": {
     "extensions": ["./src/index.ts"]
   },
-  "dependencies": {
-    "typebox": "*"
-  },
+  "dependencies": {},
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
   },

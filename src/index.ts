@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
-// Evolver — agent self-evolving engine for pi.
+// Evolver — agent self-evolving engine for pi (local-memory edition).
 //
-// A faithful pi port of EvoMap/evolver-claude-code-plugin. Three automatic
-// behaviors (no invocation needed):
+// A pi port of EvoMap/evolver-claude-code-plugin, stripped to the local-only
+// memory core. Three automatic behaviors (no invocation needed):
 //   - session_start  → inject recent successful outcomes for this workspace.
 //   - tool_result    → scan write/edit output for improvement signals.
 //   - session_shutdown(reason:"quit") → classify the session's git diff and
@@ -15,8 +15,6 @@ import { join } from "node:path";
 import { detectSignals } from "./signals";
 import { buildRecallText } from "./recall";
 import { recordOutcome } from "./record";
-import { registerTools } from "./tools";
-import { registerCommands } from "./commands";
 
 // pi file-mutation tools whose output we scan for evolution signals.
 const WRITE_TOOLS = new Set(["write", "edit", "replace"]);
@@ -94,9 +92,7 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	// Network tools + slash commands (degrade gracefully without the Proxy).
-	registerTools(pi);
-	registerCommands(pi);
+	// Local-only: no network tools or slash commands.
 
 	// Ship the capability-evolver skill.
 	pi.on("resources_discover", async (_event, _ctx) => ({

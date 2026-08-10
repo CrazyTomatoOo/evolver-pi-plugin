@@ -38,13 +38,18 @@ never throw):
 
 - `paths.ts` — forge-resistant `.evolver/workspace-id` (32-hex, `O_EXCL|O_NOFOLLOW`, mode 0600) + memory-graph path resolution.
 - `memory.ts` / `filter.ts` — JSONL graph I/O, workspace scoping, recall filter (success ∧ score ≥ 0.5 ∧ < 7 days ∧ latest 3).
-- `proxy.ts` / `tools.ts` / `commands.ts` — optional network layer: the 7 `evolver_*` mailbox tools as native `pi.registerTool` (pi has **no built-in MCP**) plus the `/evolver:*` commands; degrade gracefully when the Proxy is down.
 - `skills/capability-evolver/` — the recall → work → record skill, shipped via `resources_discover`.
+
+**Local-only edition** — the network layer (`proxy.ts` / `tools.ts` / `commands.ts`)
+was removed. The 7 `evolver_*` mailbox tools and `/evolver:*` commands no longer
+exist. If network features are needed later, port them back from
+`evolver-claude-code-plugin`; the adapter library (`@evomap/evolver-adapter-public`)
+already supports an OAuth `authMode` the Proxy CLI has not wired up yet.
 
 ## Conventions & gotchas
 
 - **The `memory_graph.jsonl` record shape is a hard external contract** — the `@evomap/evolver` engine and the Claude/Cursor siblings read it. Do not rename fields (see `record.ts` / `filter.ts`).
-- **`typebox` must stay in `dependencies`** (imported at runtime by `tools.ts`). `pi install` runs `npm install --omit=dev`, so a peer/dev-only typebox breaks extension load.
+- **No runtime dependencies** — `typebox` was removed when the network tools were; do not re-add it unless a new module actually imports it.
 - **No compile step** — TS is loaded by jiti; keep imports extensionless and node built-ins via `node:*`.
 - Signal keywords, the recall filter, and the workspace-id forging are ported **verbatim** from the reference — prefer matching it over "improving" it.
 

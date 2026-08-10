@@ -58,40 +58,10 @@ describe outcomes in terms the memory graph indexes well:
 | `deployment_issue` | build / CI / pipeline / rollback |
 | `recurring_error` | same error / still failing / not fixed |
 
-## Full pipeline (optional)
+## Engine pipeline (optional)
 
-The bundled event handlers record outcomes and recall them — that works on its
-own. To get the **full evolution engine** (automated log analysis, the
-review-and-solidify cycle that proposes and applies code improvements), install
-it:
-
-```bash
-npm install -g @evomap/evolver
-```
-
-This gives you the engine's CLI (e.g. `evolver run`, surfaced by the
-`/evolver:run` command when present) to run that pipeline separately — the
-handlers do not auto-detect or invoke it. The memory the handlers record is
-what the pipeline consumes. See the plugin README for connecting an EvoMap Hub
-node for community strategies.
-
-## Network tools (optional)
-
-When the EvoMap Proxy bridge is enabled, the plugin exposes the local EvoMap
-Proxy mailbox as pi tools:
-
-- `evolver_search_assets` — find reusable genes/capsules by signal. **Call this
-  before substantive work** to reuse proven approaches instead of reinventing them.
-- `evolver_status` — Proxy state (node id, pending counts, last sync).
-- `evolver_fetch_asset` / `evolver_report_reuse` / `evolver_publish_asset` /
-  `evolver_distill_conversation` / `evolver_poll`.
-
-Use `evolver_distill_conversation` only when the current conversation produced a
-concrete reusable capability. Include a summary, strategy steps, artifact
-paths/links, and validation evidence so the Proxy can reject weak or noisy
-candidates.
-
-The tools degrade gracefully when the Proxy isn't running (the local memory
-handlers still work). The richer, full `gep_*` surface is the separate
-[`@evomap/gep-mcp-server`](https://github.com/EvoMap/gep-mcp-server) — add it to
-your MCP config if you want it; the two compose.
+The bundled event handlers record and recall outcomes on their own. The full
+`@evomap/evolver` engine (automated log analysis, review-and-solidify) is a
+separate CLI you can install if you want that pipeline — the handlers do not
+auto-detect or invoke it. The memory the handlers record is what the pipeline
+consumes.
