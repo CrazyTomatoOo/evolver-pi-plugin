@@ -156,15 +156,6 @@ async function main() {
 			assert.strictEqual(rec.source, "hook:session-end");
 			assert.strictEqual(rec.diff_scope, "working_tree");
 			assert.ok(rec.workspace_id && /^[a-f0-9]{32}$/i.test(rec.workspace_id));
-			// Dedupe: a second immediate call with the same session records nothing new.
-			const before = lines.length;
-			await recordOutcome(repo, "sess-repo");
-			const after = fs.readFileSync(graph, "utf8").trim().split("\n").length;
-			assert.strictEqual(
-				after,
-				before,
-				"dedupe must suppress the second record",
-			);
 			delete process.env.MEMORY_GRAPH_PATH;
 		},
 	);

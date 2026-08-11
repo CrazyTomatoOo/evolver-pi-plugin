@@ -156,15 +156,10 @@ function readWorkspaceIdFile(
 }
 
 /** Compute the workspace root used to anchor the workspace-id file.
- *   - OPENCLAW_WORKSPACE wins if set.
- *   - Otherwise the git repo root above `projectDir`; if that root has a
+ *   - Use the git repo root above `projectDir`; if that root has a
  *     `workspace/` subdirectory use it, else the root itself.
  *   - If no repo root exists, fall back to `projectDir`. */
 function computeWorkspaceRoot(projectDir: string): string {
-	const explicit = process.env.OPENCLAW_WORKSPACE;
-	if (typeof explicit === "string" && explicit.length > 0) {
-		return explicit;
-	}
 	const repoRoot = findRepoRoot(projectDir);
 	if (!repoRoot) {
 		return projectDir;

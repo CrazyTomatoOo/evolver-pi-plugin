@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Ported from EvoMap/evolver-claude-code-plugin `hooks/session-start.js` (MIT).
 // Builds the session-start recall text: recent workspace-scoped evolution
-// memory plus optional non-git / pending-claim notices. Fails open (null).
+// memory plus an optional non-git notice. Fails open (null).
 
 import fs from "node:fs";
 import os from "node:os";
@@ -12,21 +12,12 @@ import { gatherWorkspaceEntries } from "./memory";
 
 const LINE_MAX = 200; // per-outcome line truncation
 const NONGIT_TTL_MS = 30 * 60 * 1000; // throttle the non-git notice
-const CLAIM_TTL_MS = 12 * 60 * 60 * 1000; // throttle the pending-claim nudge
 const THROTTLE_PRUNE_MS = 24 * 60 * 60 * 1000;
 
 const NONGIT_NOTICE =
 	"[Evolver] This folder is not a git repository, so evolution memory is " +
 	"inactive (outcomes are derived from git diffs). Run `git init` here, or " +
 	"open a git project, to enable recall and recording.";
-
-const CLAIM_NOTICE = (url: string): string =>
-	"[Evolver] Your local node is not connected to the EvoMap network " +
-	"yet. To finish connecting, open " +
-	url +
-	" while signed in to evomap.ai — that is the only step, with no id " +
-	"or secret to enter. Local evolution memory already works without " +
-	"this; connecting only adds the network gene/capsule tools.";
 
 /** Lightweight throttle backed by a small JSON map of key -> last-fired epoch.
  * Returns true when `key` fired within `ttlMs` (caller should suppress).
@@ -70,22 +61,6 @@ function throttled(key: string, ttlMs: number): boolean {
 		return false;
 	} catch (_err) {
 		return false; // fail open
-	}
-}
-
-/** Read a pending claim URL left by the engine at `~/.evomap/claim_url`.
- * Returns the trimmed url if it looks like an http(s) link, else null. Fails
- * closed (null) — the nudge is optional. */
-function readPendingClaimUrl(): string | null {
-	try {
-		const file = path.join(os.homedir(), ".evomap", "claim_url");
-		const url = fs.readFileSync(file, "utf8").trim();
-		if (/^https?:\/\//.test(url)) {
-			return url;
-		}
-		return null;
-	} catch (_err) {
-		return null;
 	}
 }
 
@@ -144,16 +119,6 @@ export function buildRecallText(projectDir: string): string | null {
 		}
 	} catch (_err) {
 		// ignore — notice is optional
-	}
-
-	// 1b. Pending-claim nudge (throttled per claim url).
-	try {
-		const claimUrl = readPendingClaimUrl();
-		if (claimUrl && !throttled(`claim:${claimUrl}`, CLAIM_TTL_MS)) {
-			parts.push(CLAIM_NOTICE(claimUrl));
-		}
-	} catch (_err) {
-		// ignore — nudge is optional
 	}
 
 	// 2. Workspace-scoped evolution memory.
