@@ -12,6 +12,9 @@ function createDependencies(
 		loadRecall: () => ({ eligible: false, workspaceId: null, entries: [] }),
 		now: Date.now,
 		detectSignals,
+		resolveWorkspaceId: () => null,
+		startSessionTransition: () => {},
+		addSessionSignals: () => {},
 	};
 }
 
@@ -28,6 +31,8 @@ describe("Mutation signals", () => {
 		);
 
 		const effects = await coordinator.mutationResult({
+			cwd: "/workspace",
+			sessionId: null,
 			toolName: "write",
 			isError: false,
 			input: {
@@ -63,6 +68,8 @@ describe("Mutation signals", () => {
 		);
 
 		const effects = await coordinator.mutationResult({
+			cwd: "/workspace",
+			sessionId: null,
 			toolName: "edit",
 			isError: false,
 			input: {
@@ -93,6 +100,8 @@ describe("Mutation signals", () => {
 		);
 
 		const effects = await coordinator.mutationResult({
+			cwd: "/workspace",
+			sessionId: null,
 			toolName: "replace",
 			isError: false,
 			input: {
@@ -125,6 +134,8 @@ describe("Mutation signals", () => {
 		];
 
 		const effects = await coordinator.mutationResult({
+			cwd: "/workspace",
+			sessionId: null,
 			toolName: "edit",
 			isError: false,
 			input: {
@@ -157,6 +168,8 @@ describe("Mutation signals", () => {
 		const boundaryFragment = "x".repeat(8_188) + "not " + "supported" + "y".repeat(8_183);
 
 		const effects = await coordinator.mutationResult({
+			cwd: "/workspace",
+			sessionId: null,
 			toolName: "write",
 			isError: false,
 			input: { path: "boundary.ts", content: boundaryFragment },
@@ -182,6 +195,8 @@ describe("Mutation signals", () => {
 			"y".repeat(8_183);
 
 		const effects = await coordinator.mutationResult({
+			cwd: "/workspace",
+			sessionId: null,
 			toolName: "edit",
 			isError: false,
 			input: {

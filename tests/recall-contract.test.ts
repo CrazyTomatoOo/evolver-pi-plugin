@@ -62,6 +62,9 @@ function coordinator(
 		loadRecall: () => ({ eligible, workspaceId, entries }),
 		now: () => NOW,
 		detectSignals: () => [],
+		resolveWorkspaceId: () => null,
+		startSessionTransition: () => {},
+		addSessionSignals: () => {},
 	};
 	return createCoreCoordinator(dependencies);
 }
@@ -72,7 +75,7 @@ async function recall(
 	deliveredRecalls: DeliveredRecall[] = [],
 ) {
 	const core = coordinator(entries);
-	await core.sessionStart({ cwd: "/workspace", reason });
+	await core.sessionStart({ cwd: "/workspace", reason, sessionId: null });
 	return core.beforeAgentStart({ cwd: "/workspace", deliveredRecalls });
 }
 
@@ -81,7 +84,9 @@ describe("First-turn Recall contract", () => {
 		test(`${reason} arms one Recall evaluation for the next user turn`, async () => {
 			const core = coordinator([success(1, "reuse this")]);
 
-			expect(await core.sessionStart({ cwd: "/workspace", reason })).toEqual([]);
+			expect(
+				await core.sessionStart({ cwd: "/workspace", reason, sessionId: null }),
+			).toEqual([]);
 			expect(
 				await core.beforeAgentStart({ cwd: "/workspace", deliveredRecalls: [] }),
 			).toHaveLength(1);
@@ -175,9 +180,12 @@ describe("First-turn Recall contract", () => {
 			loadRecall,
 			now: () => NOW,
 			detectSignals: () => [],
+			resolveWorkspaceId: () => null,
+			startSessionTransition: () => {},
+			addSessionSignals: () => {},
 		});
 
-		await core.sessionStart({ cwd: project, reason: "startup" });
+		await core.sessionStart({ cwd: project, reason: "startup", sessionId: null });
 		const effects = await core.beforeAgentStart({
 			cwd: project,
 			deliveredRecalls: [],
@@ -217,7 +225,7 @@ describe("First-turn Recall contract", () => {
 		const first = await recall([success(1, "same lesson")]);
 		const delivered = first[0]?.details;
 		const core = coordinator([success(1, "same lesson")], "workspace-2");
-		await core.sessionStart({ cwd: "/workspace", reason: "fork" });
+		await core.sessionStart({ cwd: "/workspace", reason: "fork", sessionId: null });
 
 		expect(
 			await core.beforeAgentStart({
@@ -236,8 +244,11 @@ describe("First-turn Recall contract", () => {
 			loadRecall,
 			now: () => NOW,
 			detectSignals: () => [],
+			resolveWorkspaceId: () => null,
+			startSessionTransition: () => {},
+			addSessionSignals: () => {},
 		});
-		await nonGitCore.sessionStart({ cwd: sandbox, reason: "startup" });
+		await nonGitCore.sessionStart({ cwd: sandbox, reason: "startup", sessionId: null });
 		expect(
 			await nonGitCore.beforeAgentStart({
 				cwd: sandbox,
@@ -246,7 +257,7 @@ describe("First-turn Recall contract", () => {
 		).toEqual([]);
 
 		for (const core of [coordinator([success(1, "lesson")], null), coordinator([success(1, "lesson")], null, false)]) {
-			await core.sessionStart({ cwd: "/workspace", reason: "startup" });
+			await core.sessionStart({ cwd: "/workspace", reason: "startup", sessionId: null });
 			expect(
 				await core.beforeAgentStart({ cwd: "/workspace", deliveredRecalls: [] }),
 			).toEqual([]);

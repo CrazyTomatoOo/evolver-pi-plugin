@@ -65,6 +65,7 @@ describe("Pi Adapter", () => {
 		});
 		registerPiAdapter(harness.pi, coordinator, "/skills");
 		const sessionManager = {
+			getSessionId: () => "session-1",
 			getBranch: () => [
 				{
 					type: "custom_message",
@@ -83,7 +84,9 @@ describe("Pi Adapter", () => {
 			{ cwd: "/workspace", sessionManager },
 		);
 
-		expect(starts).toEqual([{ cwd: "/workspace", reason: "startup" }]);
+		expect(starts).toEqual([
+			{ cwd: "/workspace", reason: "startup", sessionId: "session-1" },
+		]);
 		expect(beforeAgentStarts).toEqual([
 			{
 				cwd: "/workspace",
@@ -137,7 +140,10 @@ describe("Pi Adapter", () => {
 				input: { path: "README.md", content: "text" },
 				isError: false,
 			},
-			{ cwd: "/workspace" },
+			{
+				cwd: "/workspace",
+				sessionManager: { getSessionId: () => "session-1" },
+			},
 		);
 		await harness.handlers.get("tool_result")?.(
 			{
@@ -145,7 +151,10 @@ describe("Pi Adapter", () => {
 				input: { path: "README.md", edits: [] },
 				isError: true,
 			},
-			{ cwd: "/workspace" },
+			{
+				cwd: "/workspace",
+				sessionManager: { getSessionId: () => "session-1" },
+			},
 		);
 		await harness.handlers.get("session_shutdown")?.(
 			{ reason: "quit" },
@@ -164,11 +173,15 @@ describe("Pi Adapter", () => {
 		]);
 		expect(mutations).toEqual([
 			{
+				cwd: "/workspace",
+				sessionId: "session-1",
 				toolName: "write",
 				input: { path: "README.md", content: "text" },
 				isError: false,
 			},
 			{
+				cwd: "/workspace",
+				sessionId: "session-1",
 				toolName: "edit",
 				input: { path: "README.md", edits: [] },
 				isError: true,

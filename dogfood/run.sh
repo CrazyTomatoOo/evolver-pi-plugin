@@ -8,6 +8,7 @@ export MOCK_PORT
 EVOLVER_GRAPH="$HOME/.evolver/memory/evolution/memory_graph.jsonl"
 WSID="deadbeefdeadbeefdeadbeefdeadbeef"
 export EVOLVER_WORKSPACE_ID="$WSID"
+export EVOLVER_SESSION_STATE_DIR="$HOME/.evolver/state"
 
 PASS=0
 FAIL=0
@@ -52,6 +53,7 @@ echo "== assertions =="
 check "pi ran without a fatal extension-load error" "! grep -Eiq 'failed to load extension|error loading extension|cannot find module' /tmp/err.log"
 check "recall injected on the first turn with durable identity details" "grep -rql '\"customType\":\"evolver-recall\"' \"$HOME/.pi\" 2>/dev/null && grep -rql '\"workspaceId\":\"$WSID\"' \"$HOME/.pi\" 2>/dev/null && grep -rElq '\"recallHash\":\"[a-f0-9]{64}\"' \"$HOME/.pi\" 2>/dev/null"
 check "signal detected on the write (Evolution Signal present)" "grep -rql 'Evolution Signal' /tmp/out.json \"$HOME/.pi\" 2>/dev/null"
+check "durable Session baseline and accumulated signal survive outside the repository" "find \"$EVOLVER_SESSION_STATE_DIR/sessions/$WSID\" -type f -name '*.json' -print -quit | grep -q . && grep -rql '\"log_error\"' \"$EVOLVER_SESSION_STATE_DIR/sessions/$WSID\" && ! find /work/testrepo -path '*/state/sessions/*' -print -quit | grep -q ."
 check "write tool produced dogfood.txt" "test -f /work/testrepo/dogfood.txt"
 NEW_LINES=$(wc -l <"$EVOLVER_GRAPH" | tr -d ' ')
 check "session end did not fabricate an Outcome ($SEED_LINES -> $NEW_LINES)" "test \"$NEW_LINES\" -eq \"$SEED_LINES\""

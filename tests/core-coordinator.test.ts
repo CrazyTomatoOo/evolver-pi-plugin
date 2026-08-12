@@ -9,6 +9,9 @@ function createDependencies(
 ): CoordinatorDependencies {
 	return {
 		loadRecall: () => ({ eligible: false, workspaceId: null, entries: [] }),
+		resolveWorkspaceId: () => null,
+		startSessionTransition: () => {},
+		addSessionSignals: () => {},
 		now: () => Date.parse("2026-08-12T12:00:00.000Z"),
 		detectSignals: () => [],
 		...overrides,
@@ -16,6 +19,46 @@ function createDependencies(
 }
 
 describe("Core Coordinator", () => {
+	test("starts a durable transition and accumulates detected signals for the stable Session identity", async () => {
+		const starts: unknown[] = [];
+		const signalUpdates: unknown[] = [];
+		const coordinator = createCoreCoordinator(
+			createDependencies({
+				resolveWorkspaceId: () => "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				startSessionTransition: (...args) => {
+					starts.push(args);
+				},
+				addSessionSignals: (...args) => {
+					signalUpdates.push(args);
+				},
+				detectSignals: () => ["test_failure"],
+			}),
+		);
+
+		await coordinator.sessionStart({
+			cwd: "/workspace",
+			reason: "startup",
+			sessionId: "session-1",
+		});
+		await coordinator.mutationResult({
+			cwd: "/workspace",
+			sessionId: "session-1",
+			toolName: "write",
+			isError: false,
+			input: { path: "src/example.ts", content: "changed" },
+		});
+
+		expect(starts).toEqual([
+			["/workspace", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "session-1"],
+		]);
+		expect(signalUpdates).toEqual([
+			[
+				"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"session-1",
+				["test_failure"],
+			],
+		]);
+	});
 	test("delivers Recall on the first user turn with durable identity details", async () => {
 		const coordinator = createCoreCoordinator(
 			createDependencies({
@@ -33,7 +76,11 @@ describe("Core Coordinator", () => {
 		);
 
 		expect(
-			await coordinator.sessionStart({ cwd: "/workspace", reason: "startup" }),
+			await coordinator.sessionStart({
+				cwd: "/workspace",
+				reason: "startup",
+				sessionId: null,
+			}),
 		).toEqual([]);
 		const effects = await coordinator.beforeAgentStart({
 			cwd: "/workspace",
@@ -66,6 +113,8 @@ describe("Core Coordinator", () => {
 		);
 
 		const effects = await coordinator.mutationResult({
+			cwd: "/workspace",
+			sessionId: null,
 			toolName: "write",
 			isError: false,
 			input: { path: "src/example.ts", content: "fixed a regression" },

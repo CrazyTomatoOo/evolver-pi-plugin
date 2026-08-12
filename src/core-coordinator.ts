@@ -32,13 +32,15 @@ export interface CoordinatorDependencies {
 	loadRecall(projectDir: string): RecallContext;
 	now(): number;
 	detectSignals(text: string): string[];
+	resolveWorkspaceId(projectDir: string): string | null;
+	startSessionTransition(cwd: string, workspaceId: string, sessionId: string): void;
+	addSessionSignals(workspaceId: string, sessionId: string, signals: string[]): void;
 }
-
 export interface SessionStartInput {
 	cwd: string;
 	reason: SessionStartReason;
+	sessionId: string | null;
 }
-
 export interface DeliveredRecall {
 	workspaceId: string;
 	recallHash: string;
@@ -50,6 +52,8 @@ export interface BeforeAgentStartInput {
 }
 
 export interface MutationResultInput {
+	cwd: string;
+	sessionId: string | null;
 	toolName: string;
 	isError: boolean;
 	input: Record<string, unknown>;
@@ -298,8 +302,16 @@ export function createCoreCoordinator(
 ): CoreCoordinator {
 	let recallArmed = false;
 	return {
-		async sessionStart(_input) {
+		async sessionStart(input) {
 			recallArmed = true;
+			try {
+				if (!input.sessionId) return [];
+				const workspaceId = dependencies.resolveWorkspaceId(input.cwd);
+				if (!workspaceId) return [];
+				dependencies.startSessionTransition(input.cwd, workspaceId, input.sessionId);
+			} catch {
+				// fail open — transition tracking is optional
+			}
 			return [];
 		},
 
@@ -351,6 +363,12 @@ export function createCoreCoordinator(
 					left.localeCompare(right),
 				);
 				if (signals.length === 0) return [];
+				if (input.sessionId) {
+					const workspaceId = dependencies.resolveWorkspaceId(input.cwd);
+					if (workspaceId) {
+						dependencies.addSessionSignals(workspaceId, input.sessionId, signals);
+					}
+				}
 				const where = input.input.path as string;
 				return [
 					{

@@ -44,6 +44,7 @@ describe("Local-only runtime contract", () => {
 			.map((match) => match[1])
 			.sort((left, right) => left.localeCompare(right));
 		expect([...new Set(environmentVariables)]).toEqual([
+			"EVOLVER_SESSION_STATE_DIR",
 			"EVOLVER_WORKSPACE_ID",
 			"MEMORY_GRAPH_PATH",
 		]);

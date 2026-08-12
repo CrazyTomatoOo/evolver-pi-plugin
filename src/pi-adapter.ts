@@ -59,6 +59,7 @@ export function registerPiAdapter(
 			const effects = await coordinator.sessionStart({
 				cwd: ctx.cwd,
 				reason: event.reason as SessionStartReason,
+				sessionId: ctx.sessionManager.getSessionId?.() ?? null,
 			});
 			applyEffects(pi, effects);
 		} catch (_err) {
@@ -85,6 +86,8 @@ export function registerPiAdapter(
 	pi.on("tool_result", async (event, _ctx) => {
 		try {
 			const effects = await coordinator.mutationResult({
+				cwd: _ctx.cwd,
+				sessionId: _ctx.sessionManager.getSessionId?.() ?? null,
 				toolName: event.toolName,
 				isError: event.isError,
 				input: (event.input ?? {}) as Record<string, unknown>,
