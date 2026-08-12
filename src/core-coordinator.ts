@@ -3,11 +3,11 @@
 import { createHash } from "node:crypto";
 import type { OutcomeEntry } from "./filter";
 import type {
+	FinalizationResult,
 	OutcomeSource,
 	OutcomeSubmission,
 	OutcomeSubmissionResult,
 } from "./session-transition";
-
 export type SessionStartReason = "startup" | "reload" | "new" | "resume" | "fork";
 export type SessionShutdownReason = "quit" | "reload" | "new" | "resume" | "fork";
 
@@ -48,6 +48,11 @@ export interface CoordinatorDependencies {
 		source: OutcomeSource,
 		submittedAt: string,
 	): OutcomeSubmissionResult;
+	finalizeSessionOutcome(
+		cwd: string,
+		workspaceId: string,
+		sessionId: string,
+	): FinalizationResult;
 }
 export interface SessionStartInput {
 	cwd: string;
@@ -397,7 +402,16 @@ export function createCoreCoordinator(
 			}
 		},
 
-		async sessionShutdown(_input) {
+		async sessionShutdown(input) {
+			if (input.reason === "reload") return [];
+			try {
+				if (!input.sessionId) return [];
+				const workspaceId = dependencies.resolveWorkspaceId(input.cwd);
+				if (!workspaceId) return [];
+				dependencies.finalizeSessionOutcome(input.cwd, workspaceId, input.sessionId);
+			} catch {
+				// fail open — finalization is optional
+			}
 			return [];
 		},
 

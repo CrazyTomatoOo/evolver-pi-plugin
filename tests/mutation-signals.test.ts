@@ -19,6 +19,7 @@ function createDependencies(
 			code: "unavailable",
 			receipt: "Outcome submission is unavailable.",
 		}),
+		finalizeSessionOutcome: () => ({ code: "unavailable" as const, receipt: "Outcome finalization is unavailable." }),
 	};
 }
 

@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createSessionTransitionStore } from "../src/session-transition";
+import type { GraphRecorder } from "../src/graph-recorder";
+
+const stubRecorder: GraphRecorder = { record: () => ({ code: "error" }) };
 import {
 	captureWorkspaceSnapshot,
 	type WorkspaceSnapshot,
@@ -145,7 +148,7 @@ describe("Content-level Session transitions", () => {
 		const stateDir = join(mkdtempSync(join(tmpdir(), "evolver-state-")), "state");
 		sandboxes.push(join(stateDir, ".."));
 		process.env.EVOLVER_SESSION_STATE_DIR = stateDir;
-		const store = createSessionTransitionStore();
+		const store = createSessionTransitionStore(stubRecorder);
 
 		const started = store.start(
 			dir,
@@ -157,7 +160,7 @@ describe("Content-level Session transitions", () => {
 			"session-1",
 			["test_failure"],
 		);
-		const restored = createSessionTransitionStore().start(
+		const restored = createSessionTransitionStore(stubRecorder).start(
 			dir,
 			"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			"session-1",
@@ -185,7 +188,7 @@ describe("Content-level Session transitions", () => {
 		const stateDir = join(mkdtempSync(join(tmpdir(), "evolver-state-")), "state");
 		sandboxes.push(join(stateDir, ".."));
 		process.env.EVOLVER_SESSION_STATE_DIR = stateDir;
-		const store = createSessionTransitionStore();
+		const store = createSessionTransitionStore(stubRecorder);
 
 		expect(store.start(dir, "", "session-1")).toBeNull();
 		expect(
@@ -199,7 +202,7 @@ describe("Content-level Session transitions", () => {
 		const stateDir = join(mkdtempSync(join(tmpdir(), "evolver-state-")), "state");
 		sandboxes.push(join(stateDir, ".."));
 		process.env.EVOLVER_SESSION_STATE_DIR = stateDir;
-		const store = createSessionTransitionStore();
+		const store = createSessionTransitionStore(stubRecorder);
 		const workspaceId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 		const first = store.start(dir, workspaceId, "session-1");
@@ -227,7 +230,7 @@ describe("Content-level Session transitions", () => {
 		symlinkSync(outside, join(sessionDir, "session-1.json"));
 
 		expect(
-			createSessionTransitionStore().start(
+			createSessionTransitionStore(stubRecorder).start(
 				dir,
 				"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 				"session-1",

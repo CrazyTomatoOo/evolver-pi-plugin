@@ -16,6 +16,10 @@ function createDependencies(
 			code: "unavailable",
 			receipt: "Outcome submission is unavailable.",
 		}),
+		finalizeSessionOutcome: () => ({
+			code: "unavailable",
+			receipt: "Outcome finalization is unavailable.",
+		}),
 		now: () => Date.parse("2026-08-12T12:00:00.000Z"),
 		detectSignals: () => [],
 		...overrides,
@@ -153,6 +157,48 @@ describe("Core Coordinator", () => {
 				sessionId: "session-1",
 			}),
 		).toEqual([]);
+	});
+
+	test("quit, new, resume, and fork finalize the outgoing session; reload never does", async () => {
+		const finalizations: unknown[] = [];
+		const coordinator = createCoreCoordinator(
+			createDependencies({
+				resolveWorkspaceId: () => "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				finalizeSessionOutcome: (...args) => {
+					finalizations.push(args);
+					return { code: "recorded", receipt: "Outcome recorded." };
+				},
+			}),
+		);
+
+		for (const reason of ["quit", "new", "resume", "fork"] as const) {
+			finalizations.length = 0;
+			await coordinator.sessionShutdown({
+				cwd: "/workspace",
+				reason,
+				sessionId: "session-1",
+			});
+			expect(finalizations).toEqual([
+				["/workspace", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "session-1"],
+			]);
+		}
+
+		finalizations.length = 0;
+		await coordinator.sessionShutdown({
+			cwd: "/workspace",
+			reason: "reload",
+			sessionId: "session-1",
+		});
+		expect(finalizations).toEqual([]);
+
+		// Missing identity disables finalization without throwing.
+		await expect(
+			coordinator.sessionShutdown({
+				cwd: "/workspace",
+				reason: "quit",
+				sessionId: null,
+			}),
+		).resolves.toEqual([]);
 	});
 
 	test("exposes future lifecycle seams without loading Pi", async () => {

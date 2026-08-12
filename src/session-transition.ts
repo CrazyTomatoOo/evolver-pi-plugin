@@ -15,7 +15,10 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
 import { captureWorkspaceSnapshot, type WorkspaceSnapshot } from "./workspace-snapshot";
+import type { OutcomeEntry } from "./filter";
+import type { GraphRecorder } from "./graph-recorder";
 
 export type OutcomeVerdict = "success" | "failed";
 export type OutcomeSource = "tool:evolver_outcome" | "command:evolver-outcome";
@@ -60,6 +63,20 @@ export interface SessionTransitionInspection extends SessionTransitionState {
 	changed: boolean;
 }
 
+export type FinalizationCode =
+	| "recorded"
+	| "duplicate"
+	| "skipped_no_verdict"
+	| "skipped_no_changes"
+	| "stale"
+	| "unavailable"
+	| "error";
+
+export interface FinalizationResult {
+	code: FinalizationCode;
+	receipt: string;
+}
+
 export interface SessionTransitionStore {
 	start(cwd: string, workspaceId: string, sessionId: string): SessionTransitionState | null;
 	addSignals(
@@ -80,6 +97,12 @@ export interface SessionTransitionStore {
 		workspaceId: string,
 		sessionId: string,
 	): SessionTransitionInspection | null;
+	finalize(
+		cwd: string,
+		workspaceId: string,
+		sessionId: string,
+		graphPath: string,
+	): FinalizationResult;
 }
 
 const ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
@@ -94,6 +117,51 @@ const RECEIPTS: Record<OutcomeSubmissionCode, string> = {
 	unavailable: "Outcome submission is unavailable.",
 	no_changes: "Workspace has no content changes.",
 };
+
+const FINALIZE_RECEIPTS: Record<FinalizationCode, string> = {
+	recorded: "Outcome recorded.",
+	duplicate: "Outcome already recorded.",
+	skipped_no_verdict: "No pending Outcome to finalize.",
+	skipped_no_changes: "Workspace has no content changes.",
+	stale: "Pending Outcome is stale.",
+	unavailable: "Outcome finalization is unavailable.",
+	error: "Outcome finalization failed.",
+};
+
+function finalizeResult(code: FinalizationCode): FinalizationResult {
+	return { code, receipt: FINALIZE_RECEIPTS[code] };
+}
+
+function transitionHash(start: WorkspaceSnapshot, end: WorkspaceSnapshot): string {
+	return createHash("sha256")
+		.update(`evolver-transition-v1\n${start.hash}\n${end.hash}`)
+		.digest("hex");
+}
+
+function buildRecord(
+	cwd: string,
+	workspaceId: string,
+	sessionId: string,
+	state: SessionTransitionState,
+	pending: PendingOutcome,
+): OutcomeEntry {
+	return {
+		timestamp: pending.submittedAt,
+		gene_id: "ad_hoc",
+		signals: state.signals,
+		outcome: {
+			status: pending.verdict,
+			score: pending.verdict === "success" ? 0.8 : 0.3,
+			note: pending.lesson,
+		},
+		cwd,
+		workspace_id: workspaceId,
+		session_id: sessionId,
+		diff_hash: transitionHash(state.baseline, pending.endSnapshot),
+		diff_scope: "working_tree",
+		source: pending.source,
+	};
+}
 
 function result(code: OutcomeSubmissionCode): OutcomeSubmissionResult {
 	return { code, receipt: RECEIPTS[code] };
@@ -192,7 +260,9 @@ function matchingState(
 	return state?.workspaceId === workspaceId && state.sessionId === sessionId ? state : null;
 }
 
-export function createSessionTransitionStore(): SessionTransitionStore {
+export function createSessionTransitionStore(
+	recorder: GraphRecorder,
+): SessionTransitionStore {
 	return {
 		start(cwd, workspaceId, sessionId) {
 			const path = statePath(workspaceId, sessionId);
@@ -264,6 +334,40 @@ export function createSessionTransitionStore(): SessionTransitionStore {
 			const current = captureWorkspaceSnapshot(cwd);
 			if (!state || !current) return null;
 			return { ...state, current, changed: state.baseline.hash !== current.hash };
+		},
+
+		finalize(cwd, workspaceId, sessionId, graphPath) {
+			const path = statePath(workspaceId, sessionId);
+			if (!path) return finalizeResult("unavailable");
+			const state = matchingState(path, workspaceId, sessionId);
+			if (!state) return finalizeResult("unavailable");
+			const pending = state.pending;
+			if (!pending) {
+				const current = captureWorkspaceSnapshot(cwd);
+				if (current && current.hash === state.baseline.hash) {
+					return finalizeResult("skipped_no_changes");
+				}
+				return finalizeResult("skipped_no_verdict");
+			}
+			const current = captureWorkspaceSnapshot(cwd);
+			if (!current) return finalizeResult("unavailable");
+			if (current.hash !== pending.endSnapshot.hash) {
+				return finalizeResult("stale");
+			}
+			if (current.hash === state.baseline.hash) {
+				return finalizeResult("skipped_no_changes");
+			}
+		const record = buildRecord(cwd, workspaceId, sessionId, state, pending);
+			const recorded = recorder.record(graphPath, record);
+			if (recorded.code === "recorded" || recorded.code === "duplicate") {
+				delete state.pending;
+				if (!writeState(path, state)) return finalizeResult("error");
+			}
+			if (recorded.code === "recorded") return finalizeResult("recorded");
+			if (recorded.code === "duplicate") return finalizeResult("duplicate");
+			return recorded.code === "unavailable"
+				? finalizeResult("unavailable")
+				: finalizeResult("error");
 		},
 	};
 }

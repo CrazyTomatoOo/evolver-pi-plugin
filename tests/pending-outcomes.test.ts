@@ -8,6 +8,10 @@ import {
 	type CoordinatorDependencies,
 } from "../src/core-coordinator";
 import { createSessionTransitionStore } from "../src/session-transition";
+import { findMemoryGraph } from "../src/paths";
+import type { GraphRecorder } from "../src/graph-recorder";
+
+const stubRecorder: GraphRecorder = { record: () => ({ code: "error" }) };
 
 const WORKSPACE_ID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const NOW = Date.parse("2026-08-12T12:00:00.000Z");
@@ -38,7 +42,7 @@ function repository(): string {
 }
 
 function coordinator() {
-	const store = createSessionTransitionStore();
+	const store = createSessionTransitionStore(stubRecorder);
 	const dependencies: CoordinatorDependencies = {
 		loadRecall: () => ({ eligible: false, workspaceId: null, entries: [] }),
 		now: () => NOW,
@@ -52,6 +56,10 @@ function coordinator() {
 		},
 		submitSessionOutcome: (cwd, workspaceId, sessionId, submission, source, submittedAt) =>
 			store.submit(cwd, workspaceId, sessionId, submission, source, submittedAt),
+		finalizeSessionOutcome: (cwd, workspaceId, sessionId) => {
+			const graph = findMemoryGraph(cwd);
+			return store.finalize(cwd, workspaceId, sessionId, graph);
+		},
 	};
 	return createCoreCoordinator(dependencies);
 }
@@ -142,7 +150,7 @@ describe("Pending Outcome contract", () => {
 		const stateDir = join(mkdtempSync(join(tmpdir(), "evolver-state-")), "state");
 		sandboxes.push(join(stateDir, ".."));
 		process.env.EVOLVER_SESSION_STATE_DIR = stateDir;
-		const store = createSessionTransitionStore();
+		const store = createSessionTransitionStore(stubRecorder);
 		store.start(cwd, WORKSPACE_ID, "session-1");
 		store.addSignals(WORKSPACE_ID, "session-1", ["test_failure"]);
 		writeFileSync(join(cwd, "tracked.txt"), "changed\n");
@@ -227,7 +235,7 @@ describe("Pending Outcome contract", () => {
 			).toMatchObject({ code: "invalid" });
 		}
 		expect(
-			createSessionTransitionStore().submit(
+			createSessionTransitionStore(stubRecorder).submit(
 				cwd,
 				WORKSPACE_ID,
 				"session-1",
@@ -257,7 +265,7 @@ describe("Pending Outcome contract", () => {
 		const stateDir = join(mkdtempSync(join(tmpdir(), "evolver-state-")), "state");
 		sandboxes.push(join(stateDir, ".."));
 		process.env.EVOLVER_SESSION_STATE_DIR = stateDir;
-		const store = createSessionTransitionStore();
+		const store = createSessionTransitionStore(stubRecorder);
 		store.start(cwd, WORKSPACE_ID, "session-1");
 		writeFileSync(join(cwd, "tracked.txt"), "changed\n");
 		const raw2000Normalized500 = `${"x".repeat(500)}${" ".repeat(1_500)}`;
@@ -303,6 +311,7 @@ describe("Pending Outcome contract", () => {
 			startSessionTransition: () => {},
 			addSessionSignals: () => {},
 			submitSessionOutcome: () => unavailable,
+		finalizeSessionOutcome: () => unavailable,
 		});
 
 		expect(
@@ -324,7 +333,7 @@ describe("Pending Outcome contract", () => {
 		const nonGit = mkdtempSync(join(tmpdir(), "evolver-nongit-"));
 		sandboxes.push(nonGit);
 		expect(
-			createSessionTransitionStore().submit(
+			createSessionTransitionStore(stubRecorder).submit(
 				nonGit,
 				WORKSPACE_ID,
 				"session-1",

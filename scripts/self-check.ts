@@ -11,9 +11,11 @@ import { spawnSync } from "node:child_process";
 import { detectSignals } from "../src/signals";
 import { createCoreCoordinator } from "../src/core-coordinator";
 import type { OutcomeEntry } from "../src/filter";
-import { resolveWorkspaceId } from "../src/paths";
+import { resolveWorkspaceId, findMemoryGraph } from "../src/paths";
 import { appendEntry, gatherWorkspaceEntries } from "../src/memory";
 import { loadRecall } from "../src/recall";
+import { createGraphRecorder } from "../src/graph-recorder";
+import { createSessionTransitionStore } from "../src/session-transition";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "evolver-selfcheck-"));
 // Keep all state in the temp sandbox, away from the real ~/.evolver.
@@ -81,12 +83,20 @@ async function main() {
 		assert.ok(appendEntry(graph, entry));
 		const gathered = gatherWorkspaceEntries(graph, wsId, proj);
 		assert.strictEqual(gathered.length, 1);
+		const transitions = createSessionTransitionStore(createGraphRecorder());
 		const core = createCoreCoordinator({
 			loadRecall,
 			now: Date.now,
 			detectSignals,
+			resolveWorkspaceId,
+			startSessionTransition: (cwd, ws, sid) => transitions.start(cwd, ws, sid),
+			addSessionSignals: (ws, sid, sigs) => transitions.addSignals(ws, sid, sigs),
+			submitSessionOutcome: (cwd, ws, sid, sub, src, at) =>
+				transitions.submit(cwd, ws, sid, sub, src, at),
+			finalizeSessionOutcome: (cwd, ws, sid) =>
+				transitions.finalize(cwd, ws, sid, findMemoryGraph(cwd)),
 		});
-		await core.sessionStart({ cwd: proj, reason: "startup" });
+		await core.sessionStart({ cwd: proj, reason: "startup", sessionId: null });
 		const effects = await core.beforeAgentStart({
 			cwd: proj,
 			deliveredRecalls: [],
@@ -96,6 +106,51 @@ async function main() {
 		delete process.env.MEMORY_GRAPH_PATH;
 	});
 
+	await check("finalization records one immutable Outcome and clears pending", async () => {
+		const proj = path.join(tmp, "proj-fin");
+		fs.mkdirSync(proj, { recursive: true });
+		spawnSync("git", ["init", "-q", proj], { stdio: "ignore" });
+		spawnSync("git", ["-C", proj, "config", "user.email", "t@t.t"]);
+		spawnSync("git", ["-C", proj, "config", "user.name", "t"]);
+		fs.writeFileSync(path.join(proj, "a.txt"), "base\n");
+		spawnSync("git", ["-C", proj, "add", "-A"]);
+		spawnSync("git", ["-C", proj, "commit", "-qm", "init"]);
+		const graph = path.join(tmp, "fin-graph.jsonl");
+		process.env.MEMORY_GRAPH_PATH = graph;
+		const wsId = resolveWorkspaceId(proj);
+		assert.ok(wsId);
+		const transitions = createSessionTransitionStore(createGraphRecorder());
+		assert.ok(transitions.start(proj, wsId, "sess-fin"));
+		fs.writeFileSync(path.join(proj, "a.txt"), "changed\n");
+		const sub = transitions.submit(
+			proj,
+			wsId,
+			"sess-fin",
+			{ action: "set", verdict: "success", lesson: "verified approach" },
+			"tool:evolver_outcome",
+			new Date().toISOString(),
+		);
+		assert.strictEqual(sub.code, "accepted");
+		const rec = transitions.finalize(proj, wsId, "sess-fin", graph);
+		assert.strictEqual(rec.code, "recorded");
+		// Re-submitting the same transition and finalizing finds it already recorded.
+		assert.strictEqual(
+			transitions.submit(
+				proj,
+				wsId,
+				"sess-fin",
+				{ action: "set", verdict: "success", lesson: "verified approach" },
+				"tool:evolver_outcome",
+				new Date().toISOString(),
+			).code,
+			"accepted",
+		);
+		assert.strictEqual(transitions.finalize(proj, wsId, "sess-fin", graph).code, "duplicate");
+		const entries = gatherWorkspaceEntries(graph, wsId, proj);
+		assert.strictEqual(entries.length, 1);
+		assert.strictEqual(entries[0].outcome?.note, "verified approach");
+		delete process.env.MEMORY_GRAPH_PATH;
+	});
 
 	console.log(`\n${passed} checks passed.`);
 }

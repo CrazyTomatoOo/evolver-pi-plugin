@@ -69,6 +69,7 @@ function coordinator(
 			code: "unavailable",
 			receipt: "Outcome submission is unavailable.",
 		}),
+		finalizeSessionOutcome: () => ({ code: "unavailable" as const, receipt: "Outcome finalization is unavailable." }),
 	};
 	return createCoreCoordinator(dependencies);
 }
@@ -191,6 +192,10 @@ describe("First-turn Recall contract", () => {
 				code: "unavailable",
 				receipt: "Outcome submission is unavailable.",
 			}),
+finalizeSessionOutcome: () => ({
+				code: "unavailable",
+				receipt: "Outcome finalization is unavailable.",
+			}),
 		});
 
 		await core.sessionStart({ cwd: project, reason: "startup", sessionId: null });
@@ -258,6 +263,10 @@ describe("First-turn Recall contract", () => {
 			submitSessionOutcome: () => ({
 				code: "unavailable",
 				receipt: "Outcome submission is unavailable.",
+			}),
+finalizeSessionOutcome: () => ({
+				code: "unavailable",
+				receipt: "Outcome finalization is unavailable.",
 			}),
 		});
 		await nonGitCore.sessionStart({ cwd: sandbox, reason: "startup", sessionId: null });
