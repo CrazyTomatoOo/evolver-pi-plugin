@@ -95,6 +95,10 @@ async function main() {
 				transitions.submit(cwd, ws, sid, sub, src, at),
 			finalizeSessionOutcome: (cwd, ws, sid) =>
 				transitions.finalize(cwd, ws, sid, findMemoryGraph(cwd)),
+			recoverCrashLeftOutcomes: (cwd, ws) =>
+				transitions.recoverCrashLeft(cwd, ws, findMemoryGraph(cwd)),
+			drainReadyOutbox: (cwd, ws) =>
+				transitions.drainOutbox(ws, findMemoryGraph(cwd)),
 		});
 		await core.sessionStart({ cwd: proj, reason: "startup", sessionId: null });
 		const effects = await core.beforeAgentStart({
@@ -149,6 +153,50 @@ async function main() {
 		const entries = gatherWorkspaceEntries(graph, wsId, proj);
 		assert.strictEqual(entries.length, 1);
 		assert.strictEqual(entries[0].outcome?.note, "verified approach");
+		delete process.env.MEMORY_GRAPH_PATH;
+	});
+
+	await check("a queued Ready item drains and records on a later retry", async () => {
+		const proj = path.join(tmp, "proj-queue");
+		fs.mkdirSync(proj, { recursive: true });
+		spawnSync("git", ["-C", proj, "init", "-q"], { stdio: "ignore" });
+		spawnSync("git", ["-C", proj, "config", "user.email", "t@t.t"]);
+		spawnSync("git", ["-C", proj, "config", "user.name", "t"]);
+		fs.writeFileSync(path.join(proj, "a.txt"), "base\n");
+		spawnSync("git", ["-C", proj, "add", "-A"]);
+		spawnSync("git", ["-C", proj, "commit", "-qm", "init"]);
+		const graph = path.join(tmp, "queue-graph.jsonl");
+		process.env.MEMORY_GRAPH_PATH = graph;
+		const wsId = resolveWorkspaceId(proj);
+		assert.ok(wsId);
+		const real = createGraphRecorder();
+		let attempts = 0;
+		const flaky = {
+			record: (graphPath: string, entry: OutcomeEntry) => {
+				attempts += 1;
+				if (attempts <= 1) return { code: "unavailable" as const };
+				return real.record(graphPath, entry);
+			},
+		};
+		const transitions = createSessionTransitionStore(flaky);
+		assert.ok(transitions.start(proj, wsId, "sess-q"));
+		fs.writeFileSync(path.join(proj, "a.txt"), "changed\n");
+		assert.strictEqual(
+			transitions.submit(
+				proj,
+				wsId,
+				"sess-q",
+				{ action: "set", verdict: "success", lesson: "queued lesson" },
+				"tool:evolver_outcome",
+				new Date().toISOString(),
+			).code,
+			"accepted",
+		);
+		assert.strictEqual(transitions.finalize(proj, wsId, "sess-q", graph).code, "queued");
+		assert.strictEqual(transitions.drainOutbox(wsId, graph)[0]?.code, "recorded");
+		const entries = gatherWorkspaceEntries(graph, wsId, proj);
+		assert.strictEqual(entries.length, 1);
+		assert.strictEqual(entries[0].outcome?.note, "queued lesson");
 		delete process.env.MEMORY_GRAPH_PATH;
 	});
 

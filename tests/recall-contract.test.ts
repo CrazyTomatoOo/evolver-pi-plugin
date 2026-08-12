@@ -70,6 +70,8 @@ function coordinator(
 			receipt: "Outcome submission is unavailable.",
 		}),
 		finalizeSessionOutcome: () => ({ code: "unavailable" as const, receipt: "Outcome finalization is unavailable." }),
+		recoverCrashLeftOutcomes: () => [],
+		drainReadyOutbox: () => [],
 	};
 	return createCoreCoordinator(dependencies);
 }
@@ -196,6 +198,8 @@ finalizeSessionOutcome: () => ({
 				code: "unavailable",
 				receipt: "Outcome finalization is unavailable.",
 			}),
+				recoverCrashLeftOutcomes: () => [],
+				drainReadyOutbox: () => [],
 		});
 
 		await core.sessionStart({ cwd: project, reason: "startup", sessionId: null });
@@ -268,6 +272,8 @@ finalizeSessionOutcome: () => ({
 				code: "unavailable",
 				receipt: "Outcome finalization is unavailable.",
 			}),
+				recoverCrashLeftOutcomes: () => [],
+				drainReadyOutbox: () => [],
 		});
 		await nonGitCore.sessionStart({ cwd: sandbox, reason: "startup", sessionId: null });
 		expect(

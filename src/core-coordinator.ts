@@ -53,6 +53,8 @@ export interface CoordinatorDependencies {
 		workspaceId: string,
 		sessionId: string,
 	): FinalizationResult;
+	recoverCrashLeftOutcomes(cwd: string, workspaceId: string): FinalizationResult[];
+	drainReadyOutbox(cwd: string, workspaceId: string): FinalizationResult[];
 }
 export interface SessionStartInput {
 	cwd: string;
@@ -325,6 +327,11 @@ export function createCoreCoordinator(
 				const workspaceId = dependencies.resolveWorkspaceId(input.cwd);
 				if (!workspaceId) return [];
 				dependencies.startSessionTransition(input.cwd, workspaceId, input.sessionId);
+				// A non-reload start recovers crash-left pendings from a prior
+				// abnormal exit before the new session begins substantive work.
+				if (input.reason !== "reload") {
+					dependencies.recoverCrashLeftOutcomes(input.cwd, workspaceId);
+				}
 			} catch {
 				// fail open — transition tracking is optional
 			}
@@ -335,6 +342,10 @@ export function createCoreCoordinator(
 			if (!recallArmed) return [];
 			recallArmed = false;
 			try {
+				// Drain stranded Ready items first so a recovered Outcome can
+				// participate in this turn's Recall selection.
+				const workspaceId = dependencies.resolveWorkspaceId(input.cwd);
+				if (workspaceId) dependencies.drainReadyOutbox(input.cwd, workspaceId);
 				const recall = prepareRecall(
 					dependencies.loadRecall(input.cwd),
 					dependencies.now(),

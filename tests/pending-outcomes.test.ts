@@ -60,6 +60,10 @@ function coordinator() {
 			const graph = findMemoryGraph(cwd);
 			return store.finalize(cwd, workspaceId, sessionId, graph);
 		},
+		recoverCrashLeftOutcomes: (cwd, workspaceId) =>
+			store.recoverCrashLeft(cwd, workspaceId, findMemoryGraph(cwd)),
+		drainReadyOutbox: (cwd, workspaceId) =>
+			store.drainOutbox(workspaceId, findMemoryGraph(cwd)),
 	};
 	return createCoreCoordinator(dependencies);
 }
@@ -312,6 +316,8 @@ describe("Pending Outcome contract", () => {
 			addSessionSignals: () => {},
 			submitSessionOutcome: () => unavailable,
 		finalizeSessionOutcome: () => unavailable,
+			recoverCrashLeftOutcomes: () => [],
+			drainReadyOutbox: () => [],
 		});
 
 		expect(

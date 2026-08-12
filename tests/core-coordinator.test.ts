@@ -20,6 +20,8 @@ function createDependencies(
 			code: "unavailable",
 			receipt: "Outcome finalization is unavailable.",
 		}),
+		recoverCrashLeftOutcomes: () => [],
+		drainReadyOutbox: () => [],
 		now: () => Date.parse("2026-08-12T12:00:00.000Z"),
 		detectSignals: () => [],
 		...overrides,
@@ -199,6 +201,51 @@ describe("Core Coordinator", () => {
 				sessionId: null,
 			}),
 		).resolves.toEqual([]);
+	});
+
+	test("a non-reload start recovers crash-left pendings and drains the outbox before Recall", async () => {
+		const calls: string[] = [];
+		let recalled = false;
+		const coordinator = createCoreCoordinator(
+			createDependencies({
+				resolveWorkspaceId: () => "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				recoverCrashLeftOutcomes: () => {
+					calls.push("recover");
+					return [];
+				},
+				drainReadyOutbox: () => {
+					calls.push("drain");
+					return [];
+				},
+				loadRecall: () => {
+					recalled = true;
+					return { eligible: false, workspaceId: null, entries: [] };
+				},
+			}),
+		);
+
+		// Reload never recovers crash-left state.
+		await coordinator.sessionStart({
+			cwd: "/workspace",
+			reason: "reload",
+			sessionId: "session-1",
+		});
+		expect(calls).not.toContain("recover");
+
+		// A non-reload start recovers, and the next first-turn Recall drains
+		// before selecting entries.
+		await coordinator.sessionStart({
+			cwd: "/workspace",
+			reason: "new",
+			sessionId: "session-1",
+		});
+		expect(calls).toEqual(["recover"]);
+		await coordinator.beforeAgentStart({
+			cwd: "/workspace",
+			deliveredRecalls: [],
+		});
+		expect(calls).toEqual(["recover", "drain"]);
+		expect(recalled).toBe(true);
 	});
 
 	test("exposes future lifecycle seams without loading Pi", async () => {

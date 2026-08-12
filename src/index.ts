@@ -27,10 +27,12 @@ export default function (pi: ExtensionAPI): void {
 		},
 		submitSessionOutcome: (cwd, workspaceId, sessionId, submission, source, submittedAt) =>
 			transitions.submit(cwd, workspaceId, sessionId, submission, source, submittedAt),
-		finalizeSessionOutcome: (cwd, workspaceId, sessionId) => {
-			const graphPath = findMemoryGraph(cwd);
-			return transitions.finalize(cwd, workspaceId, sessionId, graphPath);
-		},
+		finalizeSessionOutcome: (cwd, workspaceId, sessionId) =>
+			transitions.finalize(cwd, workspaceId, sessionId, findMemoryGraph(cwd)),
+		recoverCrashLeftOutcomes: (cwd, workspaceId) =>
+			transitions.recoverCrashLeft(cwd, workspaceId, findMemoryGraph(cwd)),
+		drainReadyOutbox: (cwd, workspaceId) =>
+			transitions.drainOutbox(workspaceId, findMemoryGraph(cwd)),
 	});
 	registerPiAdapter(pi, coordinator, join(__dirname, "..", "skills"));
 }
