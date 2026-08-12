@@ -15,6 +15,43 @@ function hasToolResult(body) {
 	);
 }
 
+function wantsOutcome(body) {
+	return JSON.stringify(body.messages || []).includes("Call evolver_outcome");
+}
+
+function hasOutcomeResult(body) {
+	return (
+		Array.isArray(body.messages) &&
+		body.messages.some((message) => {
+			if (message?.role !== "tool") return false;
+			if (message?.name === "evolver_outcome" || message?.tool_name === "evolver_outcome") {
+				return true;
+			}
+			return JSON.stringify(message).includes("call_dogfood_outcome");
+		})
+	);
+}
+
+function outcomeToolCallMessage() {
+	return {
+		role: "assistant",
+		content: null,
+		tool_calls: [
+			{
+				id: "call_dogfood_outcome",
+				type: "function",
+				function: {
+					name: "evolver_outcome",
+					arguments: JSON.stringify({
+						action: "set",
+						verdict: "success",
+						lesson: "Reuse the verified dogfood workflow",
+					}),
+				},
+			},
+		],
+	};
+}
 function toolCallMessage() {
 	return {
 		role: "assistant",
@@ -40,8 +77,15 @@ function finalMessage() {
 	return { role: "assistant", content: "Done. I wrote the file." };
 }
 
+function responseMessage(body) {
+	if (wantsOutcome(body)) {
+		return hasOutcomeResult(body) ? finalMessage() : outcomeToolCallMessage();
+	}
+	return hasToolResult(body) ? finalMessage() : toolCallMessage();
+}
+
 function completionBody(body) {
-	const msg = hasToolResult(body) ? finalMessage() : toolCallMessage();
+	const msg = responseMessage(body);
 	const finish = msg.tool_calls ? "tool_calls" : "stop";
 	return {
 		id: "chatcmpl-dogfood",
@@ -54,7 +98,7 @@ function completionBody(body) {
 }
 
 function streamChunks(body) {
-	const msg = hasToolResult(body) ? finalMessage() : toolCallMessage();
+	const msg = responseMessage(body);
 	const finish = msg.tool_calls ? "tool_calls" : "stop";
 	const base = {
 		id: "chatcmpl-dogfood",

@@ -12,6 +12,10 @@ function createDependencies(
 		resolveWorkspaceId: () => null,
 		startSessionTransition: () => {},
 		addSessionSignals: () => {},
+		submitSessionOutcome: () => ({
+			code: "unavailable",
+			receipt: "Outcome submission is unavailable.",
+		}),
 		now: () => Date.parse("2026-08-12T12:00:00.000Z"),
 		detectSignals: () => [],
 		...overrides,
@@ -160,9 +164,16 @@ describe("Core Coordinator", () => {
 				deliveredRecalls: [],
 			}),
 		).toEqual([]);
-		expect(await coordinator.submitOutcome({ cwd: "/workspace" })).toEqual({
+		expect(
+			await coordinator.submitOutcome({
+				cwd: "/workspace",
+				sessionId: null,
+				source: "tool:evolver_outcome",
+				submission: { action: "clear" },
+			}),
+		).toEqual({
 			code: "unavailable",
-			receipt: "Outcome submission is not available yet.",
+			receipt: "Outcome submission is unavailable.",
 		});
 		expect(await coordinator.inspectStatus({ cwd: "/workspace" })).toEqual({
 			health: "unavailable",

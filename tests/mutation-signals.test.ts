@@ -15,6 +15,10 @@ function createDependencies(
 		resolveWorkspaceId: () => null,
 		startSessionTransition: () => {},
 		addSessionSignals: () => {},
+		submitSessionOutcome: () => ({
+			code: "unavailable",
+			receipt: "Outcome submission is unavailable.",
+		}),
 	};
 }
 

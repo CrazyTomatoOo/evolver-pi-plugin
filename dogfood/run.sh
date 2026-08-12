@@ -47,6 +47,11 @@ echo "seeded $SEED_LINES outcome(s)"
 echo "== run pi headless (evolver plugin installed + mock provider via -e) =="
 pi -e /dogfood/mock-provider.ts -p "Write a file named dogfood.txt containing a short test error message, then stop." --mode json >/tmp/out.json 2>/tmp/err.log
 PI_EXIT=$?
+
+SESSION_FILE=$(find "$EVOLVER_SESSION_STATE_DIR/sessions/$WSID" -type f -name '*.json' -print -quit)
+SESSION_ID=$(basename "$SESSION_FILE" .json)
+pi --session "$SESSION_ID" -e /dogfood/mock-provider.ts -p "Call evolver_outcome with action set, verdict success, and lesson 'Reuse the verified dogfood workflow', then stop." --mode json >/tmp/outcome.json 2>/tmp/outcome.err
+OUTCOME_EXIT=$?
 echo "pi exit code: $PI_EXIT"
 
 echo "== assertions =="
@@ -54,6 +59,7 @@ check "pi ran without a fatal extension-load error" "! grep -Eiq 'failed to load
 check "recall injected on the first turn with durable identity details" "grep -rql '\"customType\":\"evolver-recall\"' \"$HOME/.pi\" 2>/dev/null && grep -rql '\"workspaceId\":\"$WSID\"' \"$HOME/.pi\" 2>/dev/null && grep -rElq '\"recallHash\":\"[a-f0-9]{64}\"' \"$HOME/.pi\" 2>/dev/null"
 check "signal detected on the write (Evolution Signal present)" "grep -rql 'Evolution Signal' /tmp/out.json \"$HOME/.pi\" 2>/dev/null"
 check "durable Session baseline and accumulated signal survive outside the repository" "find \"$EVOLVER_SESSION_STATE_DIR/sessions/$WSID\" -type f -name '*.json' -print -quit | grep -q . && grep -rql '\"log_error\"' \"$EVOLVER_SESSION_STATE_DIR/sessions/$WSID\" && ! find /work/testrepo -path '*/state/sessions/*' -print -quit | grep -q ."
+check "explicit Outcome tool stores a pending verified lesson outside model context" "test \"$OUTCOME_EXIT\" -eq 0 && grep -q '\"verdict\":\"success\"' \"$SESSION_FILE\" && grep -q '\"lesson\":\"Reuse the verified dogfood workflow\"' \"$SESSION_FILE\" && ! grep -Eq '\"content\":\[\{\"type\":\"text\",\"text\":\"Pending Outcome accepted' /tmp/outcome.json"
 check "write tool produced dogfood.txt" "test -f /work/testrepo/dogfood.txt"
 NEW_LINES=$(wc -l <"$EVOLVER_GRAPH" | tr -d ' ')
 check "session end did not fabricate an Outcome ($SEED_LINES -> $NEW_LINES)" "test \"$NEW_LINES\" -eq \"$SEED_LINES\""

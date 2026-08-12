@@ -28,15 +28,24 @@ function createCoordinator(
 function createPiHarness() {
 	const handlers = new Map<string, Handler>();
 	const messages: Array<[unknown, unknown]> = [];
+	const tools: any[] = [];
+	const commands = new Map<string, any>();
+	const notifications: Array<[string, string | undefined]> = [];
 	const pi = {
 		on(event: string, handler: Handler) {
 			handlers.set(event, handler);
+		},
+		registerTool(definition: unknown) {
+			tools.push(definition);
+		},
+		registerCommand(name: string, definition: unknown) {
+			commands.set(name, definition);
 		},
 		sendMessage(message: unknown, options: unknown) {
 			messages.push([message, options]);
 		},
 	} as unknown as ExtensionAPI;
-	return { handlers, messages, pi };
+	return { commands, handlers, messages, notifications, pi, tools };
 }
 
 describe("Pi Adapter", () => {
@@ -191,5 +200,139 @@ describe("Pi Adapter", () => {
 			{ cwd: "/workspace", reason: "quit", sessionId: "session-1" },
 		]);
 		expect(resources).toEqual({ skillPaths: ["/skills"] });
+	});
+
+	test("publishes a flat Google-compatible Outcome schema and maps strict tool and command inputs", async () => {
+		const harness = createPiHarness();
+		const submissions: unknown[] = [];
+		const coordinator = createCoordinator({
+			submitOutcome: async (input) => {
+				submissions.push(input);
+				return { code: "accepted", receipt: "Pending Outcome accepted." };
+			},
+		});
+		registerPiAdapter(harness.pi, coordinator, "/skills");
+		const tool = harness.tools[0];
+		const command = harness.commands.get("evolver-outcome");
+		const context = {
+			cwd: "/workspace",
+			sessionManager: { getSessionId: () => "session-1" },
+			ui: {
+				notify(message: string, level?: string) {
+					harness.notifications.push([message, level]);
+				},
+			},
+		};
+
+		expect(tool.name).toBe("evolver_outcome");
+		expect(tool.parameters.anyOf).toBeUndefined();
+		expect(tool.parameters.properties.action.enum).toEqual(["set", "clear"]);
+		expect(tool.parameters.properties.verdict.enum).toEqual(["success", "failed"]);
+		expect(tool.parameters.additionalProperties).toBe(false);
+		expect(
+			await tool.execute(
+				"call-1",
+				{ action: "set", verdict: "success", lesson: "reuse this" },
+				undefined,
+				undefined,
+				context,
+			),
+		).toMatchObject({
+			content: [],
+			details: { code: "accepted", receipt: "Pending Outcome accepted." },
+		});
+		await command.handler("failed avoid this pitfall", context);
+		expect(submissions).toEqual([
+			{
+				cwd: "/workspace",
+				sessionId: "session-1",
+				source: "tool:evolver_outcome",
+				submission: { action: "set", verdict: "success", lesson: "reuse this" },
+			},
+			{
+				cwd: "/workspace",
+				sessionId: "session-1",
+				source: "command:evolver-outcome",
+				submission: { action: "set", verdict: "failed", lesson: "avoid this pitfall" },
+			},
+		]);
+		expect(harness.messages).toEqual([]);
+	});
+
+	test("rejects non-exact tool combinations and command syntax before the Coordinator", async () => {
+		const harness = createPiHarness();
+		const submissions: unknown[] = [];
+		const coordinator = createCoordinator({
+			submitOutcome: async (input) => {
+				submissions.push(input);
+				return { code: "accepted", receipt: "Pending Outcome accepted." };
+			},
+		});
+		registerPiAdapter(harness.pi, coordinator, "/skills");
+		const tool = harness.tools[0];
+		const command = harness.commands.get("evolver-outcome");
+		const context = {
+			cwd: "/workspace",
+			sessionManager: { getSessionId: () => "session-1" },
+			ui: { notify: () => {} },
+		};
+
+		for (const params of [
+			{ action: "set", verdict: "success" },
+			{ action: "set", lesson: "missing verdict" },
+			{ action: "set", verdict: "success", lesson: "valid", extra: true },
+			{ action: "clear", verdict: "success" },
+		]) {
+			expect(
+				await tool.execute("call-invalid", params, undefined, undefined, context),
+			).toMatchObject({ content: [], details: { code: "invalid" } });
+		}
+		for (const args of ["", "Success alias", "succeeded alias", "invalid lesson", "clear trailing"]) {
+			await command.handler(args, context);
+		}
+		expect(submissions).toEqual([]);
+	});
+
+	test("clear entrypoints map exact sources and handler failures stay fail-open", async () => {
+		const harness = createPiHarness();
+		const submissions: unknown[] = [];
+		const coordinator = createCoordinator({
+			submitOutcome: async (input) => {
+				submissions.push(input);
+				if (submissions.length > 2) throw new Error("state unavailable");
+				return { code: "cleared", receipt: "Pending Outcome cleared." };
+			},
+		});
+		registerPiAdapter(harness.pi, coordinator, "/skills");
+		const tool = harness.tools[0];
+		const command = harness.commands.get("evolver-outcome");
+		const context = {
+			cwd: "/workspace",
+			sessionManager: { getSessionId: () => "session-1" },
+			ui: { notify: () => {} },
+		};
+
+		expect(
+			await tool.execute("clear", { action: "clear" }, undefined, undefined, context),
+		).toMatchObject({ content: [], details: { code: "cleared" } });
+		await command.handler("clear", context);
+		expect(submissions.slice(0, 2)).toEqual([
+			{
+				cwd: "/workspace",
+				sessionId: "session-1",
+				source: "tool:evolver_outcome",
+				submission: { action: "clear" },
+			},
+			{
+				cwd: "/workspace",
+				sessionId: "session-1",
+				source: "command:evolver-outcome",
+				submission: { action: "clear" },
+			},
+		]);
+		expect(
+			await tool.execute("failure", { action: "clear" }, undefined, undefined, context),
+		).toMatchObject({ content: [], details: { code: "unavailable" } });
+		expect(command.handler("clear", context)).resolves.toBeUndefined();
 	});
 });

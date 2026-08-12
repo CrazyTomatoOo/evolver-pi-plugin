@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 
+import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import type {
 	CoordinatorEffect,
 	CoreCoordinator,
@@ -10,6 +12,53 @@ import type {
 	SessionStartReason,
 } from "./core-coordinator";
 
+const OutcomeParameters = Type.Object(
+	{
+		action: StringEnum(["set", "clear"] as const),
+		verdict: Type.Optional(StringEnum(["success", "failed"] as const)),
+		lesson: Type.Optional(Type.String()),
+	},
+	{ additionalProperties: false },
+);
+
+const INVALID_OUTCOME = {
+	code: "invalid" as const,
+	receipt: "Outcome submission is invalid.",
+};
+
+function parseToolSubmission(input: Record<string, unknown>) {
+	const keys = Object.keys(input).sort();
+	if (
+		input.action === "clear" &&
+		keys.length === 1
+	) {
+		return { action: "clear" } as const;
+	}
+	if (
+		input.action === "set" &&
+		(input.verdict === "success" || input.verdict === "failed") &&
+		typeof input.lesson === "string" &&
+		keys.length === 3
+	) {
+		return { action: "set", verdict: input.verdict, lesson: input.lesson } as const;
+	}
+	return null;
+}
+
+function parseCommandSubmission(args: string) {
+	if (args === "clear") return { action: "clear" } as const;
+	const match = /^(success|failed) ([\s\S]+)$/.exec(args);
+	return match
+		? { action: "set" as const, verdict: match[1] as "success" | "failed", lesson: match[2]! }
+		: null;
+}
+
+function toolResult(result: { code: string; receipt: string }) {
+	return {
+		content: [],
+		details: result,
+	};
+}
 function toPiMessage(effect: MessageEffect) {
 	const message = {
 		customType: effect.customType,
@@ -54,6 +103,63 @@ export function registerPiAdapter(
 	coordinator: CoreCoordinator,
 	skillPath: string,
 ): void {
+	pi.registerTool({
+		name: "evolver_outcome",
+		label: "Evolver Outcome",
+		description:
+			"Set or clear one verified pending Outcome for the current content transition. Lessons must be concise, reusable, and contain no secrets.",
+		parameters: OutcomeParameters,
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			try {
+				const submission = parseToolSubmission(params as Record<string, unknown>);
+				if (!submission) return toolResult(INVALID_OUTCOME);
+				const result = await coordinator.submitOutcome({
+					cwd: ctx.cwd,
+					sessionId: ctx.sessionManager.getSessionId?.() ?? null,
+					source: "tool:evolver_outcome",
+					submission,
+				});
+				return toolResult(result);
+			} catch {
+				return toolResult({
+					code: "unavailable",
+					receipt: "Outcome submission is unavailable.",
+				});
+			}
+		},
+	});
+
+	pi.registerCommand("evolver-outcome", {
+		description: "Set or clear one verified pending Outcome",
+		async handler(args, ctx) {
+			try {
+				const submission = parseCommandSubmission(args);
+				if (!submission) {
+					ctx.ui.notify(
+						"Usage: /evolver-outcome <success|failed> <lesson> | /evolver-outcome clear",
+						"error",
+					);
+					return;
+				}
+				const result = await coordinator.submitOutcome({
+					cwd: ctx.cwd,
+					sessionId: ctx.sessionManager.getSessionId?.() ?? null,
+					source: "command:evolver-outcome",
+					submission,
+				});
+				ctx.ui.notify(
+					result.receipt,
+					result.code === "accepted" || result.code === "replaced" ? "info" : "warning",
+				);
+			} catch {
+				try {
+					ctx.ui.notify("Outcome submission is unavailable.", "warning");
+				} catch {
+					// fail open — local receipt rendering is optional
+				}
+			}
+		},
+	});
 	pi.on("session_start", async (event, ctx) => {
 		try {
 			const effects = await coordinator.sessionStart({

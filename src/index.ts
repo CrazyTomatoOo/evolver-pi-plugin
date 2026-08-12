@@ -23,6 +23,8 @@ export default function (pi: ExtensionAPI): void {
 		addSessionSignals: (workspaceId, sessionId, signals) => {
 			transitions.addSignals(workspaceId, sessionId, signals);
 		},
+		submitSessionOutcome: (cwd, workspaceId, sessionId, submission, source, submittedAt) =>
+			transitions.submit(cwd, workspaceId, sessionId, submission, source, submittedAt),
 	});
 	registerPiAdapter(pi, coordinator, join(__dirname, "..", "skills"));
 }

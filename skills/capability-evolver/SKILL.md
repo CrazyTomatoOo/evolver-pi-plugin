@@ -10,36 +10,26 @@ Genome Evolution Protocol (GEP). The goal is simple: stop re-solving the same
 problem from scratch. Past outcomes — what worked, what failed — are carried
 forward into future sessions.
 
-## How it works (automatic)
+## How it works
 
-Three pi events run on their own; you don't invoke them:
+- **First-turn Recall** injects a short, bounded summary of recent eligible Outcomes for this workspace.
+- Successful `write`, `edit`, and `replace` results produce advisory mutation signals.
+- Outcomes are **never inferred automatically**. After verifying substantive changed work, submit one explicit verdict and reusable lesson with `evolver_outcome`:
+  - `{ action: "set", verdict: "success" | "failed", lesson: "..." }`
+  - `{ action: "clear" }`
 
-- **`session_start`** — injects a short summary of recent **successful** outcomes
-  for *this workspace* (filtered to score ≥ 0.5, < 7 days old, max 3) as
-  context. The agent sees "here's what worked recently" before it starts.
-- **`tool_result`** (write/edit) — scans edits for improvement signals
-  (`log_error`, `perf_bottleneck`, `capability_gap`, `test_failure`, …) and
-  nudges the agent to record the outcome when relevant.
-- **`session_shutdown`** — at the end of a session, collects the git diff,
-  classifies the outcome, and appends it to the evolution memory graph (scoped
-  to the workspace so other projects' memory never leaks in).
-
+The lesson should capture one reusable technique or pitfall in at most 500 normalized characters. Do not include secrets. Submission is local, makes no model or network call, and remains pending until it is replaced, cleared, or finalized at a later lifecycle boundary.
 Memory is written to a local JSONL graph. With no extra setup it lands in
 `~/.evolver/memory/evolution/memory_graph.jsonl`; inside an evolver-managed
 project it lands under that project's `memory/evolution/`.
 
 ## What you (the agent) should do
 
-For any **substantive** task — a feature, a non-trivial fix, a refactor:
+For substantive changed work:
 
-1. **Before starting**, check the injected evolution memory (it arrives as
-   session-start context). If a recent successful outcome matches the task,
-   reuse that approach. If a recent *failure* matches, avoid repeating it.
-2. **Do the work.**
-3. **After finishing**, the `session_shutdown` handler records the outcome
-   automatically. You don't need to call anything — but if the task had a clear
-   lesson worth a one-line note, say so in your final message so it's captured
-   in the diff context the recorder reads.
+1. Reuse relevant injected Recall.
+2. Complete and verify the work.
+3. Call `evolver_outcome` once with the verified verdict and one concise reusable lesson. If the pending verdict is no longer valid, clear it explicitly.
 
 Trivial or purely conversational turns don't need this — skip it.
 

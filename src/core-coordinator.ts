@@ -2,6 +2,11 @@
 
 import { createHash } from "node:crypto";
 import type { OutcomeEntry } from "./filter";
+import type {
+	OutcomeSource,
+	OutcomeSubmission,
+	OutcomeSubmissionResult,
+} from "./session-transition";
 
 export type SessionStartReason = "startup" | "reload" | "new" | "resume" | "fork";
 export type SessionShutdownReason = "quit" | "reload" | "new" | "resume" | "fork";
@@ -35,6 +40,14 @@ export interface CoordinatorDependencies {
 	resolveWorkspaceId(projectDir: string): string | null;
 	startSessionTransition(cwd: string, workspaceId: string, sessionId: string): void;
 	addSessionSignals(workspaceId: string, sessionId: string, signals: string[]): void;
+	submitSessionOutcome(
+		cwd: string,
+		workspaceId: string,
+		sessionId: string,
+		submission: OutcomeSubmission,
+		source: OutcomeSource,
+		submittedAt: string,
+	): OutcomeSubmissionResult;
 }
 export interface SessionStartInput {
 	cwd: string;
@@ -67,11 +80,9 @@ export interface SessionShutdownInput {
 
 export interface OutcomeSubmissionInput {
 	cwd: string;
-}
-
-export interface OutcomeSubmissionResult {
-	code: "unavailable";
-	receipt: string;
+	sessionId: string | null;
+	source: OutcomeSource;
+	submission: OutcomeSubmission;
 }
 
 export interface StatusInspectionInput {
@@ -390,11 +401,35 @@ export function createCoreCoordinator(
 			return [];
 		},
 
-		async submitOutcome(_input) {
-			return {
-				code: "unavailable",
-				receipt: "Outcome submission is not available yet.",
-			};
+		async submitOutcome(input) {
+			try {
+				if (!input.sessionId) {
+					return {
+						code: "unavailable",
+						receipt: "Outcome submission is unavailable.",
+					};
+				}
+				const workspaceId = dependencies.resolveWorkspaceId(input.cwd);
+				if (!workspaceId) {
+					return {
+						code: "unavailable",
+						receipt: "Outcome submission is unavailable.",
+					};
+				}
+				return dependencies.submitSessionOutcome(
+					input.cwd,
+					workspaceId,
+					input.sessionId,
+					input.submission,
+					input.source,
+					new Date(dependencies.now()).toISOString(),
+				);
+			} catch {
+				return {
+					code: "unavailable",
+					receipt: "Outcome submission is unavailable.",
+				};
+			}
 		},
 
 		async inspectStatus(_input) {

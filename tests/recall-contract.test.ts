@@ -65,6 +65,10 @@ function coordinator(
 		resolveWorkspaceId: () => null,
 		startSessionTransition: () => {},
 		addSessionSignals: () => {},
+		submitSessionOutcome: () => ({
+			code: "unavailable",
+			receipt: "Outcome submission is unavailable.",
+		}),
 	};
 	return createCoreCoordinator(dependencies);
 }
@@ -183,6 +187,10 @@ describe("First-turn Recall contract", () => {
 			resolveWorkspaceId: () => null,
 			startSessionTransition: () => {},
 			addSessionSignals: () => {},
+			submitSessionOutcome: () => ({
+				code: "unavailable",
+				receipt: "Outcome submission is unavailable.",
+			}),
 		});
 
 		await core.sessionStart({ cwd: project, reason: "startup", sessionId: null });
@@ -247,6 +255,10 @@ describe("First-turn Recall contract", () => {
 			resolveWorkspaceId: () => null,
 			startSessionTransition: () => {},
 			addSessionSignals: () => {},
+			submitSessionOutcome: () => ({
+				code: "unavailable",
+				receipt: "Outcome submission is unavailable.",
+			}),
 		});
 		await nonGitCore.sessionStart({ cwd: sandbox, reason: "startup", sessionId: null });
 		expect(
