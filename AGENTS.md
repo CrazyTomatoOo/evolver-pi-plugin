@@ -1,63 +1,107 @@
 # evolver-pi-plugin
 
-Evolver — agent self-evolving engine for pi. A pi **package** that gives pi a
-persistent, workspace-scoped evolution memory, interoperable with the EvoMap
-ecosystem (same `memory_graph.jsonl` the `@evomap/evolver` engine reads).
-Faithful, clean-room port of `EvoMap/evolver-claude-code-plugin`.
+Evolver — agent self-evolving engine for pi (`@earendil-works/pi-coding-agent`
+^0.84.1). A pi **package** that gives pi a persistent, workspace-scoped
+evolution memory, interoperable with the EvoMap ecosystem (same
+`memory_graph.jsonl` the `@evomap/evolver` engine reads). Clean-room port of
+`EvoMap/evolver-claude-code-plugin`. **Local-only edition**: no Hub, no Proxy,
+no outbound network.
 
-## Commands
+## Build / Test / Lint / Format
 
-No build step — pi loads the TypeScript directly via jiti. Run in this order:
-
-```bash
-npm install                 # deps (typebox is a RUNTIME dependency)
-npx tsc --noEmit            # type check (there is no compile/build)
-bun scripts/self-check.ts   # logic self-check; temp sandbox, never touches ~/.evolver
-pi -e .                     # load the extension in pi for a quick manual check
-```
-
-Full integration test — real pi in Docker against a mock model (no network, no
-API keys; asserts all three behaviors fire; exit 0 = pass):
+No build step — pi loads the TypeScript directly via jiti. No lint or formatter
+is configured; match existing style by hand (tabs, double quotes).
 
 ```bash
+npm ci                        # reproducible install
+npm test                      # 108 Bun contract tests
+npm run typecheck             # tsc --noEmit
+npm run self-check            # composed core flow in temp sandboxes
+npm pack --dry-run            # package metadata sanity
 docker build -f dogfood/Dockerfile -t evolver-dogfood .
-docker run --rm evolver-dogfood
+docker run --rm --network none evolver-dogfood   # 21/21 = pass
 ```
 
-## Architecture
+## Architecture & key abstractions
 
-Entry: `src/index.ts` (declared under `pi.extensions` in `package.json`). It
-wires three pi events to the ported logic — **everything fails open** (handlers
-never throw):
+**Primary seam**: a Pi-independent `CoreCoordinator` (`src/core-coordinator.ts`)
+owns domain orchestration; a thin `PiAdapter` (`src/pi-adapter.ts`) only
+translates events and effects. Everything fails open — handlers never throw.
 
-| pi event | behavior | module |
+`src/index.ts` is composition only: it creates dependencies, the Coordinator,
+and registers the Pi adapter. Dependencies are injected so lifecycle behavior is
+testable without loading real Pi.
+
+| Module | Responsibility |
+| --- | --- |
+| `core-coordinator.ts` | Session start/recovery, Recall preparation, mutation-signal accumulation, explicit submission, lifecycle finalization, Ready-outbox drain, status inspection, one-shot announcements. |
+| `pi-adapter.ts` | Registers `evolver_outcome` tool + `/evolver-outcome` + `/evolver-status` commands; maps pi events to Coordinator calls; renders the status widget; clears widget on input/shutdown. |
+| `session-transition.ts` | Durable per-session state: content-level workspace baseline, accumulated signals, pending Outcome, Ready Outbox, result slots, read-only status inspection. Atomic 0600 writes. |
+| `workspace-snapshot.ts` | Canonical manifest of tracked + nonignored untracked paths (path/mode/hash); symlink target hashed without following. |
+| `graph-recorder.ts` | Exclusive local lock + check-and-append to `memory_graph.jsonl`; immutable first record; duplicate detection; read-only `inspect`. |
+| `recall.ts` | Loads workspace-scoped Graph entries for Recall. |
+| `memory.ts` / `filter.ts` | JSONL graph I/O, workspace scoping, Recall filter (success ∧ score ≥ 0.5 ∧ ≤ 7 days ∧ balanced newest 3, ≤ 2 000 chars). |
+| `signals.ts` | Advisory signal detection from mutation fragments. |
+| `status.ts` | Read-only `StatusSnapshot` types + renderer (12-char prefixes, ≤ 160-char lesson preview, health derivation). |
+| `paths.ts` | Forge-resistant `.evolver/workspace-id` (32-hex, `O_EXCL|O_NOFOLLOW`, mode 0600) + memory-graph path resolution. |
+
+### State, lock, and outbox invariants
+
+- **Transition state** (`<stateRoot>/sessions/<wsid>/<session>.json`): baseline,
+  signals, pending Outcome. Atomic 0600, symlink + mode guarded.
+- **Ready Outbox** (`<stateRoot>/outbox/<wsid>/<diff_hash>.json`): a fully
+  validated final record materialized before Graph append; survives lock/IO
+  failure; drained before Recall on later starts/boundaries.
+- **Result slots** (`<stateRoot>/results/<wsid>.json`): `lastAttempt` (every
+  finalization) separate from `lastRecorded` (recorded/duplicate only); no
+  TTL/history; duplicate/skip never erase the last append.
+- **Graph** (`memory_graph.jsonl`): the sole deduplication truth. Identity is
+  `workspaceId + diff_hash` (versioned SHA-256 over ordered start/end
+  snapshots), never Session ID. First record immutable.
+- **Lock**: `O_EXCL|O_NOFOLLOW` 0600 lock file with stall detection; serializes
+  the check-and-append transaction only.
+
+### Dependencies
+
+`@earendil-works/pi-ai` 0.84.1 and `typebox` 1.3.7 are runtime dependencies
+(the Outcome tool schema uses `StringEnum`). Pi is a `^0.84.1` peer and a
+0.84.1 dev dependency. The dogfood pins pi 0.84.1. Bump all three together.
+
+## Configuration & Environment
+
+| Variable | Default | Purpose |
 | --- | --- | --- |
-| `session_start` | inject recent successful outcomes (`sendMessage`, `deliverAs:"nextTurn"`) | `recall.ts` |
-| `tool_result` (`write`/`edit`/`replace`) | detect improvement signals in the edit | `signals.ts` |
-| `session_shutdown` (`reason:"quit"`) | classify the git diff once, append one outcome | `record.ts` |
+| `MEMORY_GRAPH_PATH` | (auto) | Override the memory-graph file location. |
+| `EVOLVER_WORKSPACE_ID` | (auto) | Override the workspace-scoping id. |
+| `EVOLVER_SESSION_STATE_DIR` | `~/.evolver` | Where durable transition/outbox/result state lives. |
 
-- `paths.ts` — forge-resistant `.evolver/workspace-id` (32-hex, `O_EXCL|O_NOFOLLOW`, mode 0600) + memory-graph path resolution.
-- `memory.ts` / `filter.ts` — JSONL graph I/O, workspace scoping, recall filter (success ∧ score ≥ 0.5 ∧ < 7 days ∧ latest 3).
-- `skills/capability-evolver/` — the recall → work → record skill, shipped via `resources_discover`.
-
-**Local-only edition** — the network layer (`proxy.ts` / `tools.ts` / `commands.ts`)
-was removed. The 7 `evolver_*` mailbox tools and `/evolver:*` commands no longer
-exist. If network features are needed later, port them back from
-`evolver-claude-code-plugin`; the adapter library (`@evomap/evolver-adapter-public`)
-already supports an OAuth `authMode` the Proxy CLI has not wired up yet.
+Only these three are read by production code. `MOCK_PORT` is dogfood-only.
 
 ## Conventions & gotchas
 
-- **The `memory_graph.jsonl` record shape is a hard external contract** — the `@evomap/evolver` engine and the Claude/Cursor siblings read it. Do not rename fields (see `record.ts` / `filter.ts`).
-- **No runtime dependencies** — `typebox` was removed when the network tools were; do not re-add it unless a new module actually imports it.
-- **No compile step** — TS is loaded by jiti; keep imports extensionless and node built-ins via `node:*`.
-- Signal keywords, the recall filter, and the workspace-id forging are ported **verbatim** from the reference — prefer matching it over "improving" it.
+- **The `memory_graph.jsonl` record shape is a hard external contract** — the
+  `@evomap/evolver` engine and the Claude/Cursor siblings read it
+  byte-compatibly. Never rename fields (see `filter.ts`).
+- **No compile step** — TS is loaded by jiti; keep imports extensionless and
+  node built-ins via `node:*`. Explicit `.ts` extensions and bare built-ins
+  break loading.
+- **No backward compatibility** — remove obsolete paths rather than adding
+  compatibility layers. The local-only edition intentionally replaced the
+  network layer; do not re-add Hub/Proxy/mailbox/OAuth paths.
+- **Outcomes are explicit only** — never classify a verdict from a diff keyword
+  or fabricate `stable_success_plateau`. Only a complete explicit submission
+  can produce a record.
+- **Recall delivers once** — armed on `session_start`, delivered on the next
+  `before_agent_start`, idempotent via `workspaceId + recallHash` on the active
+  branch. `reload` never finalizes or re-injects.
 
 ## References
 
-- `README.md` — user-facing overview, install, environment variables.
+- `README.md` / `README.zh-CN.md` — user-facing overview (English/Chinese agree).
+- `skills/capability-evolver/SKILL.md` — agent capability guidance.
 - `docs/agents/` — agent-workflow conventions (issue tracker, triage, domain).
-- `research/*` branches — port research (reference internals, pi API mapping, network protocol).
+- `docs/research/` — **historical port research only**; labelled as such and
+  does not document current runtime behavior.
 
 ## Agent skills
 

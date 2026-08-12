@@ -2,34 +2,37 @@
 
 English | [中文](./README.zh-CN.md)
 
-Give the [pi](https://github.com/mariozechner/pi) coding agent a **persistent,
-auditable evolution memory**. Instead of re-solving the same problem every
-session, pi recalls what worked before, notices improvement signals as it
-edits, and records how each session turned out — so the next session starts
-smarter.
+Give the [pi](https://github.com/earendil-works/pi-coding-agent) coding agent a
+**persistent, auditable evolution memory**. Instead of re-solving the same
+problem every session, pi recalls what worked before, notices improvement
+signals as it edits, and lets you or the agent explicitly record how each session
+turned out — so the next session starts smarter.
 
-A pi port of
+A clean-room port of
 [`evolver-claude-code-plugin`](https://github.com/EvoMap/evolver-claude-code-plugin)
-— same memory format, same clean-room logic, re-expressed on pi's extension API.
-**Local-only edition**: no Proxy, no Hub, no network. The memory graph stays
-byte-compatible with the `@evomap/evolver` engine and sibling plugins.
+— same memory-graph format, re-expressed on pi's extension API.
+**Local-only edition**: no Hub, no Proxy, no outbound network. The memory graph
+stays byte-compatible with the `@evomap/evolver` engine and sibling plugins.
 
 ## What it does
 
-Three behaviors run automatically — you don't invoke them:
+Lifecycle events drive one local core; nothing is inferred automatically:
 
 | pi event | Effect |
 | --- | --- |
-| `session_start` | Injects a summary of recent **successful** outcomes for this workspace (score ≥ 0.5, < 7 days, max 3) as passive context. |
-| `tool_result` (write/edit/replace) | Detects improvement signals (`log_error`, `perf_bottleneck`, `capability_gap`, `test_failure`, …) in edits and nudges the agent to record the outcome. |
-| `session_shutdown` (`reason: "quit"`) | Classifies the session's git diff once and appends the outcome to the evolution memory graph. |
+| `session_start` | Arms one **first-turn balanced Recall** (success/failed, ≤ 7 days, score ≥ 0.5, newest-first, max 3, ≤ 2 000 chars) for the next user turn. |
+| `before_agent_start` | Drains the Ready Outbox, then delivers the armed Recall once (idempotent across reload/resume/fork via `workspaceId + recallHash`). |
+| `tool_result` (`write`/`edit`/`replace`) | Scans successful mutations for advisory signals (`log_error`, `perf_bottleneck`, `capability_gap`, `test_failure`, …). |
+| `session_shutdown` (`quit`/`new`/`resume`/`fork`) | Finalizes one explicit pending Outcome into the immutable Graph (`reload` never finalizes). |
 
-Memory is **workspace-scoped** (via a forge-resistant `.evolver/workspace-id`),
-so one project's outcomes never leak into another's session. It is written
-byte-compatibly with the `@evomap/evolver` engine and the sibling Claude/Cursor
-plugins.
+Outcomes are **explicit only** — submit a verdict and one reusable lesson via the
+`evolver_outcome` tool or `/evolver-outcome` command. Nothing is classified from
+a diff keyword or fabricated from the absence of signals.
 
-It also ships a **`capability-evolver` skill** (recall → work → record loop).
+Memory is **workspace-scoped** via a forge-resistant `.evolver/workspace-id`, so
+one project's outcomes never leak into another's. State (baselines, Ready
+Outbox, result slots) is atomic mode-0600 and symlink-guarded under
+`EVOLVER_SESSION_STATE_DIR`.
 
 ## Install
 
@@ -40,50 +43,59 @@ pi install git:github.com/CrazyTomatoOo/evolver-pi-plugin
 Restart pi (or `/reload`). **Local memory works with zero config** — no account,
 no key, nothing to fill in.
 
-## Local mode (default, zero config)
+## Commands and tools
 
-Outcomes land in `~/.evolver/memory/evolution/memory_graph.jsonl` (or the
-project's `memory/evolution/` inside an evolver-managed repo). Recall and record
-work immediately. **No account, no key, no network.**
+| Surface | Name | Purpose |
+| --- | --- | --- |
+| LLM tool | `evolver_outcome` | `set`/`clear` one verified pending verdict + lesson (Google-compatible flat schema). |
+| Slash command | `/evolver-outcome` | Same contract, user-initiated; receipts stay outside model context. |
+| Slash command | `/evolver-status` | Render a read-only below-editor widget (refresh on repeat, clears on next input). |
+
+Submission makes no model call and returns no Session message; the receipt is a
+local notification only.
+
+## Local storage
+
+| Path | Contents |
+| --- | --- |
+| `~/.evolver/memory/evolution/memory_graph.jsonl` | Append-only immutable Outcome records (the sole deduplication truth). |
+| `~/.evolver/state/sessions/<wsid>/<session>.json` | Per-session baseline, signals, pending Outcome. |
+| `~/.evolver/state/outbox/<wsid>/<diff_hash>.json` | Stranded Ready items awaiting Graph append. |
+| `~/.evolver/state/results/<wsid>.json` | `lastAttempt`/`lastRecorded` receipt slots + announcement state. |
+
+Inside an evolver-managed repo the graph lands under that project's
+`memory/evolution/`.
 
 ## Requirements
 
-- **Node.js ≥ 22** — the extension is pure Node; no HTTP bridge.
-- **Git** — outcomes are derived from the project's git diff.
-
-## Status
-
-- ✅ **Local core** — the three automatic behaviors, workspace-scoped memory,
-  and the skill.
-- ⏳ **npm publishing** — `pi install npm:` once a consumer needs it.
+- **Node.js ≥ 22** — pure TypeScript loaded by pi via jiti; no build step.
+- **Git** — workspace snapshots are derived from the working tree.
+- **pi `^0.84.1`** — the tested Pi line (pinned in `package.json` and the dogfood).
 
 ## Environment variables
 
+Only four are read by production code:
+
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `MEMORY_GRAPH_PATH` | (auto) | Override the memory graph file location. |
-| `EVOLVER_WORKSPACE_ID` | (auto) | Override the workspace scoping id. |
-| `EVOLVER_SESSION_STATE_DIR` | `~/.evolver` | Where throttle/dedupe state lives. |
-| `EVOLVER_HOOK_LOG_DIR` | `~/.evolver/logs` | Where the evolution breadcrumb log lives. |
+| `MEMORY_GRAPH_PATH` | (auto) | Override the memory-graph file location. |
+| `EVOLVER_WORKSPACE_ID` | (auto) | Override the workspace-scoping id. |
+| `EVOLVER_SESSION_STATE_DIR` | `~/.evolver` | Where durable transition/outbox/result state lives. |
 
-## Development
-
-```bash
-git clone https://github.com/CrazyTomatoOo/evolver-pi-plugin
-cd evolver-pi-plugin
-npm install
-npx tsc --noEmit            # type check (no build step — pi loads TS via jiti)
-bun scripts/self-check.ts   # logic self-check (temp sandbox, never touches ~/.evolver)
-pi -e .                     # load the extension for a quick test
-```
-
-Full integration test — real pi in Docker against a mock model (no network, no
-API keys); asserts all three behaviors fire:
+## Verification
 
 ```bash
+npm ci
+npm test                    # 108 Bun contract tests
+npm run typecheck           # tsc --noEmit
+npm run self-check          # composed core flow in temp sandboxes
+npm pack --dry-run          # package metadata sanity
 docker build -f dogfood/Dockerfile -t evolver-dogfood .
-docker run --rm evolver-dogfood   # exit 0 = all assertions pass
+docker run --rm --network none evolver-dogfood   # 21/21 = pass
 ```
+
+The Docker gate runs real pi against a loopback mock model with
+**`--network none`** — proving no Hub or external-network dependency is required.
 
 ## License
 
