@@ -40,41 +40,67 @@ function createPiHarness() {
 }
 
 describe("Pi Adapter", () => {
-	test("delegates Session start and translates the returned message effect", async () => {
+	test("returns first-turn Recall and reads durable delivery details from the active branch", async () => {
 		const harness = createPiHarness();
 		const starts: unknown[] = [];
+		const beforeAgentStarts: unknown[] = [];
 		const coordinator = createCoordinator({
 			sessionStart: async (input) => {
 				starts.push(input);
+				return [];
+			},
+			beforeAgentStart: async (input) => {
+				beforeAgentStarts.push(input);
 				return [
 					{
 						type: "message",
 						customType: "evolver-recall",
 						content: "remember this",
 						display: true,
-						deliverAs: "nextTurn",
+						deliverAs: "currentTurn",
+						details: { workspaceId: "workspace-1", recallHash: "hash-1" },
 					},
 				];
 			},
 		});
 		registerPiAdapter(harness.pi, coordinator, "/skills");
+		const sessionManager = {
+			getBranch: () => [
+				{
+					type: "custom_message",
+					customType: "evolver-recall",
+					details: { workspaceId: "workspace-1", recallHash: "old-hash" },
+				},
+			],
+		};
 
 		await harness.handlers.get("session_start")?.(
 			{ reason: "startup" },
-			{ cwd: "/workspace" },
+			{ cwd: "/workspace", sessionManager },
+		);
+		const result = await harness.handlers.get("before_agent_start")?.(
+			{},
+			{ cwd: "/workspace", sessionManager },
 		);
 
 		expect(starts).toEqual([{ cwd: "/workspace", reason: "startup" }]);
-		expect(harness.messages).toEqual([
-			[
-				{
-					customType: "evolver-recall",
-					content: "remember this",
-					display: true,
-				},
-				{ deliverAs: "nextTurn" },
-			],
+		expect(beforeAgentStarts).toEqual([
+			{
+				cwd: "/workspace",
+				deliveredRecalls: [
+					{ workspaceId: "workspace-1", recallHash: "old-hash" },
+				],
+			},
 		]);
+		expect(result).toEqual({
+			message: {
+				customType: "evolver-recall",
+				content: "remember this",
+				display: true,
+				details: { workspaceId: "workspace-1", recallHash: "hash-1" },
+			},
+		});
+		expect(harness.messages).toEqual([]);
 	});
 
 	test("delegates mutation, shutdown, and skill discovery without domain logic", async () => {
@@ -100,7 +126,10 @@ describe("Pi Adapter", () => {
 
 		await harness.handlers.get("before_agent_start")?.(
 			{},
-			{ cwd: "/workspace" },
+			{
+				cwd: "/workspace",
+				sessionManager: { getBranch: () => [] },
+			},
 		);
 		await harness.handlers.get("tool_result")?.(
 			{
@@ -130,7 +159,9 @@ describe("Pi Adapter", () => {
 			{ cwd: "/workspace" },
 		);
 
-		expect(beforeAgentStarts).toEqual([{ cwd: "/workspace" }]);
+		expect(beforeAgentStarts).toEqual([
+			{ cwd: "/workspace", deliveredRecalls: [] },
+		]);
 		expect(mutations).toEqual([
 			{
 				toolName: "write",

@@ -1,20 +1,36 @@
 // SPDX-License-Identifier: MIT
 
+import { createHash } from "node:crypto";
+import type { OutcomeEntry } from "./filter";
+
 export type SessionStartReason = "startup" | "reload" | "new" | "resume" | "fork";
 export type SessionShutdownReason = "quit" | "reload" | "new" | "resume" | "fork";
+
+export interface RecallDetails {
+	workspaceId: string;
+	recallHash: string;
+}
 
 export interface MessageEffect {
 	type: "message";
 	customType: "evolver-recall" | "evolver-signal";
 	content: string;
 	display: true;
-	deliverAs: "nextTurn" | "steer";
+	deliverAs: "currentTurn" | "steer";
+	details?: RecallDetails;
 }
 
 export type CoordinatorEffect = MessageEffect;
 
+export interface RecallContext {
+	eligible: boolean;
+	workspaceId: string | null;
+	entries: OutcomeEntry[];
+}
+
 export interface CoordinatorDependencies {
-	buildRecallText(projectDir: string): string | null;
+	loadRecall(projectDir: string): RecallContext;
+	now(): number;
 	detectSignals(text: string): string[];
 }
 
@@ -23,8 +39,14 @@ export interface SessionStartInput {
 	reason: SessionStartReason;
 }
 
+export interface DeliveredRecall {
+	workspaceId: string;
+	recallHash: string;
+}
+
 export interface BeforeAgentStartInput {
 	cwd: string;
+	deliveredRecalls: DeliveredRecall[];
 }
 
 export interface MutationResultInput {
@@ -136,30 +158,182 @@ function sampleMutationFragments(fragments: string[]): string[] {
 	return samples;
 }
 
+const RECALL_MAX_LENGTH = 2_000;
+const RECALL_MAX_RESULTS = 3;
+const RECALL_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1_000;
+const TRUSTED_FAILURE_SOURCES = new Set([
+	"tool:evolver_outcome",
+	"command:evolver-outcome",
+]);
+
+function recallStatus(entry: OutcomeEntry, now: number): "success" | "failed" | null {
+	const timestamp =
+		typeof entry.timestamp === "string" ? Date.parse(entry.timestamp) : Number.NaN;
+	if (
+		!Number.isFinite(timestamp) ||
+		timestamp > now ||
+		timestamp < now - RECALL_MAX_AGE_MS
+	) {
+		return null;
+	}
+	const outcome = entry.outcome;
+	if (
+		outcome?.status === "success" &&
+		typeof outcome.score === "number" &&
+		outcome.score >= 0.5
+	) {
+		return "success";
+	}
+	if (
+		outcome?.status === "failed" &&
+		typeof outcome.note === "string" &&
+		outcome.note.trim().length > 0 &&
+		typeof entry.source === "string" &&
+		TRUSTED_FAILURE_SOURCES.has(entry.source)
+	) {
+		return "failed";
+	}
+	return null;
+}
+
+function selectRecallEntries(entries: OutcomeEntry[], now: number): OutcomeEntry[] {
+	const eligible = entries
+		.filter((entry) => recallStatus(entry, now) !== null)
+		.sort(
+			(left, right) =>
+				Date.parse(right.timestamp as string) - Date.parse(left.timestamp as string),
+		);
+	const selected = eligible.slice(0, RECALL_MAX_RESULTS);
+	const statuses = new Set(eligible.map((entry) => recallStatus(entry, now)));
+	const selectedStatuses = new Set(selected.map((entry) => recallStatus(entry, now)));
+	if (
+		statuses.has("success") &&
+		statuses.has("failed") &&
+		selected.length === RECALL_MAX_RESULTS
+	) {
+		const missing = selectedStatuses.has("success") ? "failed" : "success";
+		if (!selectedStatuses.has(missing)) {
+			const replacement = eligible.find(
+				(entry) => recallStatus(entry, now) === missing,
+			);
+			if (replacement) {
+				selected.splice(-1, 1, replacement);
+				selected.sort(
+					(left, right) =>
+						Date.parse(right.timestamp as string) -
+						Date.parse(left.timestamp as string),
+				);
+			}
+		}
+	}
+	return selected;
+}
+
+function formatRecall(entries: OutcomeEntry[], now: number): string {
+	const successes = entries.filter(
+		(entry) => recallStatus(entry, now) === "success",
+	).length;
+	const failures = entries.length - successes;
+	const header =
+		`[Evolution Memory] Recent ${entries.length} outcomes ` +
+		`(${successes} success, ${failures} failed):`;
+	const footer = "Use successful approaches. Avoid repeating failed patterns.";
+	const rows = entries.map((entry) => {
+		const status = recallStatus(entry, now);
+		const icon = status === "success" ? "+" : "-";
+		const date = (entry.timestamp as string).slice(0, 10);
+		const score = typeof entry.outcome?.score === "number" ? entry.outcome.score : "?";
+		const signals = Array.isArray(entry.signals)
+			? entry.signals.slice(0, 3).join(", ")
+			: "";
+		return `[${icon}] ${date} score=${score} signals=[${signals}] ${entry.outcome?.note?.trim() ?? ""}`;
+	});
+	const full = [header, ...rows, "", footer].join("\n");
+	if (full.length <= RECALL_MAX_LENGTH) return full;
+	const fixedLength = header.length + footer.length + 3;
+	const availableRows = RECALL_MAX_LENGTH - fixedLength;
+	const marker = "… [truncated]";
+	const included: string[] = [];
+	let used = 0;
+	for (const row of rows) {
+		const separator = included.length === 0 ? 0 : 1;
+		if (used + separator + row.length <= availableRows) {
+			included.push(row);
+			used += separator + row.length;
+			continue;
+		}
+		const available = availableRows - used - separator;
+		if (available >= marker.length) {
+			included.push(`${row.slice(0, available - marker.length)}${marker}`);
+		} else if (included.length > 0) {
+			const previous = included.at(-1);
+			if (previous) {
+				included[included.length - 1] = `${previous.slice(0, -marker.length)}${marker}`;
+			}
+		}
+		break;
+	}
+	return [header, ...included, "", footer].join("\n");
+}
+
+function prepareRecall(
+	context: RecallContext,
+	now: number,
+): { content: string; details: RecallDetails } | null {
+	if (!context.eligible || !context.workspaceId) return null;
+	const selected = selectRecallEntries(context.entries, now);
+	if (selected.length === 0) return null;
+	const content = formatRecall(selected, now);
+	return {
+		content,
+		details: {
+			workspaceId: context.workspaceId,
+			recallHash: createHash("sha256").update(content).digest("hex"),
+		},
+	};
+}
+
 export function createCoreCoordinator(
 	dependencies: CoordinatorDependencies,
 ): CoreCoordinator {
+	let recallArmed = false;
 	return {
-		async sessionStart(input) {
+		async sessionStart(_input) {
+			recallArmed = true;
+			return [];
+		},
+
+		async beforeAgentStart(input) {
+			if (!recallArmed) return [];
+			recallArmed = false;
 			try {
-				const text = dependencies.buildRecallText(input.cwd);
-				if (!text) return [];
+				const recall = prepareRecall(
+					dependencies.loadRecall(input.cwd),
+					dependencies.now(),
+				);
+				if (!recall) return [];
+				if (
+					input.deliveredRecalls.some(
+						(delivered) =>
+							delivered.workspaceId === recall.details.workspaceId &&
+							delivered.recallHash === recall.details.recallHash,
+					)
+				) {
+					return [];
+				}
 				return [
 					{
 						type: "message",
 						customType: "evolver-recall",
-						content: text,
+						content: recall.content,
 						display: true,
-						deliverAs: "nextTurn",
+						deliverAs: "currentTurn",
+						details: recall.details,
 					},
 				];
 			} catch {
 				return [];
 			}
-		},
-
-		async beforeAgentStart(_input) {
-			return [];
 		},
 
 		async mutationResult(input) {

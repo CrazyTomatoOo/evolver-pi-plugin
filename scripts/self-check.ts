@@ -7,11 +7,13 @@ import assert from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { detectSignals } from "../src/signals";
-import { filterRelevant, type OutcomeEntry } from "../src/filter";
+import { createCoreCoordinator } from "../src/core-coordinator";
+import type { OutcomeEntry } from "../src/filter";
 import { resolveWorkspaceId } from "../src/paths";
 import { appendEntry, gatherWorkspaceEntries } from "../src/memory";
-import { buildRecallText } from "../src/recall";
+import { loadRecall } from "../src/recall";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "evolver-selfcheck-"));
 // Keep all state in the temp sandbox, away from the real ~/.evolver.
@@ -44,36 +46,6 @@ async function main() {
 		assert.deepStrictEqual(detectSignals(""), []);
 	});
 
-	await check(
-		"filterRelevant keeps recent high-score successes, caps at 3",
-		() => {
-			const now = Date.now();
-			const iso = (msAgo: number) => new Date(now - msAgo).toISOString();
-			const mk = (
-				score: number,
-				status: string,
-				msAgo: number,
-			): OutcomeEntry => ({
-				timestamp: iso(msAgo),
-				outcome: { status, score, note: "x" },
-			});
-			const entries = [
-				mk(0.9, "success", 30 * 86400000), // drop: too old (oldest)
-				mk(0.95, "success", 4 * 86400000), // recent success, oldest of the four -> dropped by cap
-				mk(0.6, "success", 3 * 86400000), // keep
-				mk(0.7, "success", 2 * 86400000), // keep
-				mk(0.4, "success", 1 * 86400000), // drop: score < 0.5
-				mk(0.3, "failed", 1 * 86400000), // drop: failed
-				mk(0.8, "success", 1 * 86400000), // keep (newest)
-			];
-			const relevant = filterRelevant(entries);
-			assert.strictEqual(relevant.length, 3, `got ${relevant.length}`);
-			assert.ok(relevant.every((e) => e.outcome?.status === "success"));
-			// Tail (latest) kept: the 0.95/4d is oldest of the four successes -> dropped.
-			assert.ok(!relevant.some((e) => e.outcome?.score === 0.95));
-		},
-	);
-
 	await check("resolveWorkspaceId forges a stable 32-hex 0600 id", () => {
 		const proj = path.join(tmp, "proj-ws");
 		fs.mkdirSync(proj, { recursive: true });
@@ -88,9 +60,9 @@ async function main() {
 		delete process.env.EVOLVER_WORKSPACE_ID;
 	});
 
-	await check("memory roundtrip: append -> gather -> recall text", () => {
+	await check("memory roundtrip delivers first-turn recall", async () => {
 		const proj = path.join(tmp, "proj-mem");
-		fs.mkdirSync(proj, { recursive: true });
+		spawnSync("git", ["init", "-q", proj], { stdio: "ignore" });
 		const graph = path.join(tmp, "graph.jsonl");
 		process.env.MEMORY_GRAPH_PATH = graph;
 		const wsId = resolveWorkspaceId(proj);
@@ -109,9 +81,18 @@ async function main() {
 		assert.ok(appendEntry(graph, entry));
 		const gathered = gatherWorkspaceEntries(graph, wsId, proj);
 		assert.strictEqual(gathered.length, 1);
-		const text = buildRecallText(proj);
-		assert.ok(text && text.includes("[Evolution Memory]"), `text=${text}`);
-		assert.ok(text!.includes("did the thing"));
+		const core = createCoreCoordinator({
+			loadRecall,
+			now: Date.now,
+			detectSignals,
+		});
+		await core.sessionStart({ cwd: proj, reason: "startup" });
+		const effects = await core.beforeAgentStart({
+			cwd: proj,
+			deliveredRecalls: [],
+		});
+		assert.strictEqual(effects.length, 1);
+		assert.ok(effects[0]?.content.includes("did the thing"));
 		delete process.env.MEMORY_GRAPH_PATH;
 	});
 

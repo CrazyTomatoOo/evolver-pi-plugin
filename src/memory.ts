@@ -7,9 +7,6 @@ import fs from "node:fs";
 import path from "node:path";
 import type { OutcomeEntry } from "./filter";
 
-// How many workspace-matched entries to gather for recall scanning.
-const MAX_SCAN_ENTRIES = 5;
-
 /** Read a JSONL graph into entries in file order (oldest first). Malformed
  * lines are skipped. Never throws. */
 export function readEntries(graphPath: string): OutcomeEntry[] {
@@ -77,8 +74,7 @@ export function belongsToWorkspace(
 	return true;
 }
 
-/** Read the graph and gather up to MAX_SCAN_ENTRIES entries belonging to this
- * workspace, scanning from newest (end) to oldest. Returns them in
+/** Read every graph entry belonging to this workspace. Returns entries in
  * chronological order. Never throws. */
 export function gatherWorkspaceEntries(
 	graphPath: string,
@@ -107,9 +103,6 @@ export function gatherWorkspaceEntries(
 		}
 		if (belongsToWorkspace(entry, currentId, currentDir)) {
 			collected.push(entry);
-			if (collected.length >= MAX_SCAN_ENTRIES) {
-				break;
-			}
 		}
 	}
 

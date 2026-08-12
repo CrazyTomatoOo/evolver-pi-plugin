@@ -50,7 +50,7 @@ echo "pi exit code: $PI_EXIT"
 
 echo "== assertions =="
 check "pi ran without a fatal extension-load error" "! grep -Eiq 'failed to load extension|error loading extension|cannot find module' /tmp/err.log"
-check "recall injected (Evolution Memory present)" "grep -rql 'Evolution Memory' /tmp/out.json \"$HOME/.pi\" 2>/dev/null"
+check "recall injected on the first turn with durable identity details" "grep -rql '\"customType\":\"evolver-recall\"' \"$HOME/.pi\" 2>/dev/null && grep -rql '\"workspaceId\":\"$WSID\"' \"$HOME/.pi\" 2>/dev/null && grep -rElq '\"recallHash\":\"[a-f0-9]{64}\"' \"$HOME/.pi\" 2>/dev/null"
 check "signal detected on the write (Evolution Signal present)" "grep -rql 'Evolution Signal' /tmp/out.json \"$HOME/.pi\" 2>/dev/null"
 check "write tool produced dogfood.txt" "test -f /work/testrepo/dogfood.txt"
 NEW_LINES=$(wc -l <"$EVOLVER_GRAPH" | tr -d ' ')

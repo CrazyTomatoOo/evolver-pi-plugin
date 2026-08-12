@@ -9,7 +9,8 @@ function createDependencies(
 	detectSignals: CoordinatorDependencies["detectSignals"],
 ): CoordinatorDependencies {
 	return {
-		buildRecallText: () => null,
+		loadRecall: () => ({ eligible: false, workspaceId: null, entries: [] }),
+		now: Date.now,
 		detectSignals,
 	};
 }

@@ -4,21 +4,49 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type {
 	CoordinatorEffect,
 	CoreCoordinator,
+	DeliveredRecall,
+	MessageEffect,
 	SessionShutdownReason,
 	SessionStartReason,
 } from "./core-coordinator";
 
+function toPiMessage(effect: MessageEffect) {
+	const message = {
+		customType: effect.customType,
+		content: effect.content,
+		display: effect.display,
+	};
+	return effect.details ? { ...message, details: effect.details } : message;
+}
+
 function applyEffects(pi: ExtensionAPI, effects: CoordinatorEffect[]): void {
 	for (const effect of effects) {
-		pi.sendMessage(
-			{
-				customType: effect.customType,
-				content: effect.content,
-				display: effect.display,
-			},
-			{ deliverAs: effect.deliverAs },
-		);
+		if (effect.deliverAs !== "steer") continue;
+		pi.sendMessage(toPiMessage(effect), { deliverAs: "steer" });
 	}
+}
+
+function deliveredRecalls(branch: unknown[]): DeliveredRecall[] {
+	const delivered: DeliveredRecall[] = [];
+	for (const value of branch) {
+		if (typeof value !== "object" || value === null) continue;
+		const entry = value as Record<string, unknown>;
+		if (entry.type !== "custom_message" || entry.customType !== "evolver-recall") {
+			continue;
+		}
+		if (typeof entry.details !== "object" || entry.details === null) continue;
+		const details = entry.details as Record<string, unknown>;
+		if (
+			typeof details.workspaceId === "string" &&
+			typeof details.recallHash === "string"
+		) {
+			delivered.push({
+				workspaceId: details.workspaceId,
+				recallHash: details.recallHash,
+			});
+		}
+	}
+	return delivered;
 }
 
 export function registerPiAdapter(
@@ -40,8 +68,15 @@ export function registerPiAdapter(
 
 	pi.on("before_agent_start", async (_event, ctx) => {
 		try {
-			const effects = await coordinator.beforeAgentStart({ cwd: ctx.cwd });
+			const effects = await coordinator.beforeAgentStart({
+				cwd: ctx.cwd,
+				deliveredRecalls: deliveredRecalls(ctx.sessionManager.getBranch()),
+			});
 			applyEffects(pi, effects);
+			const recall = effects.find(
+				(effect) => effect.deliverAs === "currentTurn",
+			);
+			return recall ? { message: toPiMessage(recall) } : undefined;
 		} catch (_err) {
 			// fail open — Recall preparation is optional
 		}

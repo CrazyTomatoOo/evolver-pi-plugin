@@ -8,35 +8,53 @@ function createDependencies(
 	overrides: Partial<CoordinatorDependencies> = {},
 ): CoordinatorDependencies {
 	return {
-		buildRecallText: () => null,
+		loadRecall: () => ({ eligible: false, workspaceId: null, entries: [] }),
+		now: () => Date.parse("2026-08-12T12:00:00.000Z"),
 		detectSignals: () => [],
 		...overrides,
 	};
 }
 
 describe("Core Coordinator", () => {
-	test("prepares the existing Recall message without loading Pi", async () => {
+	test("delivers Recall on the first user turn with durable identity details", async () => {
 		const coordinator = createCoreCoordinator(
 			createDependencies({
-				buildRecallText: (cwd) =>
-					cwd === "/workspace" ? "remember this approach" : null,
+				loadRecall: () => ({
+					eligible: true,
+					workspaceId: "workspace-1",
+					entries: [
+						{
+							timestamp: "2026-08-12T11:00:00.000Z",
+							outcome: { status: "success", score: 0.8, note: "reuse this" },
+						},
+					],
+				}),
 			}),
 		);
 
-		const effects = await coordinator.sessionStart({
+		expect(
+			await coordinator.sessionStart({ cwd: "/workspace", reason: "startup" }),
+		).toEqual([]);
+		const effects = await coordinator.beforeAgentStart({
 			cwd: "/workspace",
-			reason: "startup",
+			deliveredRecalls: [],
 		});
 
-		expect(effects).toEqual([
-			{
-				type: "message",
-				customType: "evolver-recall",
-				content: "remember this approach",
-				display: true,
-				deliverAs: "nextTurn",
+		expect(effects).toHaveLength(1);
+		expect(effects[0]).toMatchObject({
+			type: "message",
+			customType: "evolver-recall",
+			display: true,
+			deliverAs: "currentTurn",
+			details: {
+				workspaceId: "workspace-1",
+				recallHash: expect.stringMatching(/^[a-f0-9]{64}$/),
 			},
-		]);
+		});
+		expect(await coordinator.beforeAgentStart({
+			cwd: "/workspace",
+			deliveredRecalls: [],
+		})).toEqual([]);
 	});
 
 	test("turns existing mutation signals into a Pi-neutral effect", async () => {
@@ -88,7 +106,10 @@ describe("Core Coordinator", () => {
 		const coordinator = createCoreCoordinator(createDependencies());
 
 		expect(
-			await coordinator.beforeAgentStart({ cwd: "/workspace" }),
+			await coordinator.beforeAgentStart({
+				cwd: "/workspace",
+				deliveredRecalls: [],
+			}),
 		).toEqual([]);
 		expect(await coordinator.submitOutcome({ cwd: "/workspace" })).toEqual({
 			code: "unavailable",
