@@ -8,6 +8,30 @@ import http from "node:http";
 const PORT = Number(process.env.MOCK_PORT || "18999");
 let callCount = 0;
 
+function userTextOf(message) {
+	if (!message || message.role !== "user") return null;
+	const content = message.content;
+	let text = null;
+	if (typeof content === "string") text = content;
+	else if (Array.isArray(content)) {
+		const block = content.find((c) => c && c.type === "text");
+		if (block && typeof block.text === "string") text = block.text;
+	}
+	// Skip evolver-injected custom messages (recall/signal) that pi maps to the
+	// user role — they start with "[Evolution" and are not the real prompt.
+	if (text && text.startsWith("[Evolution")) return null;
+	return text;
+}
+
+function latestUserText(body) {
+	const messages = Array.isArray(body.messages) ? body.messages : [];
+	for (let i = messages.length - 1; i >= 0; i -= 1) {
+		const text = userTextOf(messages[i]);
+		if (text !== null) return text;
+	}
+	return "";
+}
+
 function hasToolResult(body) {
 	return (
 		Array.isArray(body.messages) &&
@@ -52,7 +76,10 @@ function outcomeToolCallMessage() {
 		],
 	};
 }
-function toolCallMessage() {
+function toolCallMessage(body) {
+	const text = latestUserText(body);
+	const match = /Write a file named ([\w.-]+) containing/.exec(text);
+	const path = match ? match[1] : "dogfood.txt";
 	return {
 		role: "assistant",
 		content: null,
@@ -63,7 +90,7 @@ function toolCallMessage() {
 				function: {
 					name: "write",
 					arguments: JSON.stringify({
-						path: "dogfood.txt",
+						path,
 						content:
 							"first line\nerror: dogfood failure to trigger a signal\nlast line\n",
 					}),
@@ -78,10 +105,14 @@ function finalMessage() {
 }
 
 function responseMessage(body) {
+	const text = latestUserText(body);
+	if (text.trim().startsWith("/")) {
+		return finalMessage();
+	}
 	if (wantsOutcome(body)) {
 		return hasOutcomeResult(body) ? finalMessage() : outcomeToolCallMessage();
 	}
-	return hasToolResult(body) ? finalMessage() : toolCallMessage();
+	return hasToolResult(body) ? finalMessage() : toolCallMessage(body);
 }
 
 function completionBody(body) {
