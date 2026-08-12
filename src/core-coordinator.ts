@@ -2,6 +2,7 @@
 
 import { createHash } from "node:crypto";
 import type { OutcomeEntry } from "./filter";
+import type { StatusSnapshot } from "./status";
 import type {
 	FinalizationResult,
 	OutcomeSource,
@@ -25,8 +26,12 @@ export interface MessageEffect {
 	details?: RecallDetails;
 }
 
-export type CoordinatorEffect = MessageEffect;
+export interface AnnouncementEffect {
+	type: "announcement";
+	content: string;
+}
 
+export type CoordinatorEffect = MessageEffect | AnnouncementEffect;
 export interface RecallContext {
 	eligible: boolean;
 	workspaceId: string | null;
@@ -55,6 +60,8 @@ export interface CoordinatorDependencies {
 	): FinalizationResult;
 	recoverCrashLeftOutcomes(cwd: string, workspaceId: string): FinalizationResult[];
 	drainReadyOutbox(cwd: string, workspaceId: string): FinalizationResult[];
+	inspectStatusSnapshot(cwd: string, workspaceId: string, sessionId: string): StatusSnapshot | null;
+	pendingAnnouncements(workspaceId: string): string[];
 }
 export interface SessionStartInput {
 	cwd: string;
@@ -94,10 +101,11 @@ export interface OutcomeSubmissionInput {
 
 export interface StatusInspectionInput {
 	cwd: string;
+	sessionId: string | null;
 }
 
 export interface StatusInspectionResult {
-	health: "unavailable";
+	snapshot: StatusSnapshot | null;
 	reason: string;
 }
 
@@ -332,10 +340,16 @@ export function createCoreCoordinator(
 				if (input.reason !== "reload") {
 					dependencies.recoverCrashLeftOutcomes(input.cwd, workspaceId);
 				}
-			} catch {
-				// fail open — transition tracking is optional
-			}
-			return [];
+			// One-shot finalization announcements are surfaced once at start.
+			const announcements = dependencies.pendingAnnouncements(workspaceId);
+			return announcements.map((content) => ({
+				type: "announcement" as const,
+				content,
+			}));
+		} catch {
+			// fail open — transition tracking is optional
+		}
+		return [];
 		},
 
 		async beforeAgentStart(input) {
@@ -457,11 +471,24 @@ export function createCoreCoordinator(
 			}
 		},
 
-		async inspectStatus(_input) {
-			return {
-				health: "unavailable",
-				reason: "Status inspection is not available yet.",
-			};
+		async inspectStatus(input) {
+			try {
+				if (!input.sessionId) {
+					return { snapshot: null, reason: "No active session." };
+				}
+				const workspaceId = dependencies.resolveWorkspaceId(input.cwd);
+				if (!workspaceId) {
+					return { snapshot: null, reason: "No safe workspace identity." };
+				}
+				const snapshot = dependencies.inspectStatusSnapshot(
+					input.cwd,
+					workspaceId,
+					input.sessionId,
+				);
+				return { snapshot, reason: snapshot ? "ok" : "unavailable" };
+			} catch {
+				return { snapshot: null, reason: "Status inspection is unavailable." };
+			}
 		},
 	};
 }

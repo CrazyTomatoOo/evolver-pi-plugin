@@ -65,6 +65,7 @@ NEW_LINES=$(wc -l <"$EVOLVER_GRAPH" | tr -d ' ')
 check "quit with no pending Outcome did not fabricate a record ($SEED_LINES -> $COUNT_AFTER_FIRST)" "test \"$COUNT_AFTER_FIRST\" -eq \"$SEED_LINES\""
 check "quit after an explicit verified Outcome recorded exactly one line ($COUNT_AFTER_FIRST -> $NEW_LINES)" "test \"$NEW_LINES\" -eq \"$((SEED_LINES + 1))\""
 check "recorded Outcome preserves the verified lesson, success status, and explicit source" "tail -1 \"$EVOLVER_GRAPH\" | grep -q '\"status\":\"success\"' && tail -1 \"$EVOLVER_GRAPH\" | grep -q '\"note\":\"Reuse the verified dogfood workflow\"' && tail -1 \"$EVOLVER_GRAPH\" | grep -q '\"source\":\"tool:evolver_outcome\"'"
+check "durable result slot records the last finalization attempt" "test -f \"$EVOLVER_SESSION_STATE_DIR/results/$WSID.json\" && grep -q '\"lastAttempt\"' \"$EVOLVER_SESSION_STATE_DIR/results/$WSID.json\""
 
 echo
 echo "== result: $PASS passed, $FAIL failed =="

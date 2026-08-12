@@ -18,7 +18,7 @@ function createCoordinator(
 			receipt: "not available",
 		}),
 		inspectStatus: async () => ({
-			health: "unavailable",
+			snapshot: null,
 			reason: "not available",
 		}),
 		...overrides,
@@ -31,6 +31,7 @@ function createPiHarness() {
 	const tools: any[] = [];
 	const commands = new Map<string, any>();
 	const notifications: Array<[string, string | undefined]> = [];
+	const widgets: Array<[string, string[] | undefined]> = [];
 	const pi = {
 		on(event: string, handler: Handler) {
 			handlers.set(event, handler);
@@ -41,11 +42,14 @@ function createPiHarness() {
 		registerCommand(name: string, definition: unknown) {
 			commands.set(name, definition);
 		},
-		sendMessage(message: unknown, options: unknown) {
-			messages.push([message, options]);
-		},
+	sendMessage(message: unknown, options: unknown) {
+		messages.push([message, options]);
+	},
+	setWidget(key: string, content: string[] | undefined) {
+		widgets.push([key, content]);
+	},
 	} as unknown as ExtensionAPI;
-	return { commands, handlers, messages, notifications, pi, tools };
+	return { commands, handlers, messages, notifications, pi, tools, widgets };
 }
 
 describe("Pi Adapter", () => {
@@ -334,5 +338,99 @@ describe("Pi Adapter", () => {
 			await tool.execute("failure", { action: "clear" }, undefined, undefined, context),
 		).toMatchObject({ content: [], details: { code: "unavailable" } });
 		expect(command.handler("clear", context)).resolves.toBeUndefined();
+	});
+
+	test("/evolver-status renders the snapshot below the editor and stays outside model context", async () => {
+		const harness = createPiHarness();
+		const snapshot = {
+			workspace: {
+				root: "/repo",
+				gitHealth: "ok" as const,
+				workspaceIdPrefix: "abcd1234abcd",
+				sessionIdPrefix: "000011112222",
+				recordingReady: true,
+				disabledReason: null,
+			},
+			graph: {
+				path: "/repo/memory_graph.jsonl",
+				health: "ok" as const,
+				totalCount: 1,
+				workspaceCount: 1,
+				malformedCount: 0,
+				lockState: "free" as const,
+			},
+			session: null,
+			pending: null,
+			recall: null,
+			lastAttempt: null,
+			lastRecorded: null,
+			overallHealth: "ready" as const,
+		};
+		const coordinator = createCoordinator({
+			inspectStatus: async () => ({ snapshot, reason: "ok" }),
+		});
+		registerPiAdapter(harness.pi, coordinator, "/skills");
+		const command = harness.commands.get("evolver-status");
+		const context = {
+			cwd: "/repo",
+			sessionManager: { getSessionId: () => "session-1" },
+		ui: { notify: () => {}, setWidget: (k: string, c: string[] | undefined) => harness.widgets.push([k, c]) },
+		};
+
+		await command.handler("", context);
+
+		expect(harness.widgets).toHaveLength(1);
+		expect(harness.widgets[0][0]).toBe("evolver-status");
+		const lines = harness.widgets[0][1] ?? [];
+		expect(lines.some((l) => l.includes("Evolver status: ready"))).toBe(true);
+		expect(lines.some((l) => l.includes("Workspace:"))).toBe(true);
+		// Full paths appear; no raw JSON or diff contents.
+		expect(lines.some((l) => l.includes("/repo/memory_graph.jsonl"))).toBe(true);
+		expect(lines.some((l) => l.includes("{"))).toBe(false);
+		expect(harness.messages).toEqual([]);
+	});
+
+	test("one-shot finalization announcements notify once and stay outside model context", async () => {
+		const harness = createPiHarness();
+		const notifications: Array<[string, string | undefined]> = [];
+		const coordinator = createCoordinator({
+			sessionStart: async () => [
+				{ type: "announcement", content: "Outcome recorded." },
+			],
+		});
+		registerPiAdapter(harness.pi, coordinator, "/skills");
+		const context = {
+			cwd: "/repo",
+			sessionManager: { getSessionId: () => "session-1", getBranch: () => [] },
+			ui: {
+				notify: (m: string, t?: string) => notifications.push([m, t]),
+				setWidget: () => {},
+			},
+		};
+
+		await harness.handlers.get("session_start")?.({ reason: "startup" }, context);
+
+		expect(notifications).toEqual([["Outcome recorded.", "info"]]);
+		// No session/custom message was injected into the model transcript.
+		expect(harness.messages).toEqual([]);
+	});
+
+	test("the status widget clears on the next non-status input and on shutdown", async () => {
+		const harness = createPiHarness();
+		const coordinator = createCoordinator();
+		registerPiAdapter(harness.pi, coordinator, "/skills");
+		const cleared: string[] = [];
+		const context = {
+			cwd: "/repo",
+			sessionManager: { getSessionId: () => "session-1", getBranch: () => [] },
+			ui: { notify: () => {}, setWidget: (_k: string, c: string[] | undefined) => {
+				if (c === undefined) cleared.push("widget");
+			} },
+		};
+
+		await harness.handlers.get("input")?.({ text: "write a file" }, context);
+		await harness.handlers.get("session_shutdown")?.({ reason: "quit" }, context);
+
+		expect(cleared.length).toBeGreaterThanOrEqual(2);
 	});
 });

@@ -22,6 +22,8 @@ function createDependencies(
 		}),
 		recoverCrashLeftOutcomes: () => [],
 		drainReadyOutbox: () => [],
+		inspectStatusSnapshot: () => null,
+		pendingAnnouncements: () => [],
 		now: () => Date.parse("2026-08-12T12:00:00.000Z"),
 		detectSignals: () => [],
 		...overrides,
@@ -268,9 +270,8 @@ describe("Core Coordinator", () => {
 			code: "unavailable",
 			receipt: "Outcome submission is unavailable.",
 		});
-		expect(await coordinator.inspectStatus({ cwd: "/workspace" })).toEqual({
-			health: "unavailable",
-			reason: "Status inspection is not available yet.",
-		});
+		expect(
+			await coordinator.inspectStatus({ cwd: "/workspace", sessionId: null }),
+		).toEqual({ snapshot: null, reason: "No active session." });
 	});
 });

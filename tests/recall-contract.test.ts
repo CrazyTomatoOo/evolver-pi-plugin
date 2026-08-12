@@ -7,6 +7,7 @@ import {
 	createCoreCoordinator,
 	type CoordinatorDependencies,
 	type DeliveredRecall,
+	type MessageEffect,
 	type SessionStartReason,
 } from "../src/core-coordinator";
 import type { OutcomeEntry } from "../src/filter";
@@ -72,6 +73,8 @@ function coordinator(
 		finalizeSessionOutcome: () => ({ code: "unavailable" as const, receipt: "Outcome finalization is unavailable." }),
 		recoverCrashLeftOutcomes: () => [],
 		drainReadyOutbox: () => [],
+		inspectStatusSnapshot: () => null,
+		pendingAnnouncements: () => [],
 	};
 	return createCoreCoordinator(dependencies);
 }
@@ -105,7 +108,7 @@ describe("First-turn Recall contract", () => {
 
 	test("an identical workspace and Recall hash on the active branch suppresses delivery", async () => {
 		const first = await recall([success(1, "reuse this")]);
-		const details = first[0]?.details;
+		const details = (first[0] as MessageEffect | undefined)?.details;
 		expect(details).toBeDefined();
 
 		for (const reason of ["reload", "resume", "startup", "fork"] as const) {
@@ -117,11 +120,11 @@ describe("First-turn Recall contract", () => {
 
 	test("changed Recall content is delivered once after a later start", async () => {
 		const first = await recall([success(2, "old lesson")]);
-		const delivered = first[0]?.details;
+		const delivered = (first[0] as MessageEffect | undefined)?.details;
 		const second = await recall([success(1, "new lesson")], "reload", [delivered!]);
 
 		expect(second).toHaveLength(1);
-		expect(second[0]?.details?.recallHash).not.toBe(delivered?.recallHash);
+		expect((second[0] as MessageEffect | undefined)?.details?.recallHash).not.toBe(delivered?.recallHash);
 	});
 
 	test("filters age, success score, and untrusted or lessonless failures", async () => {
@@ -200,6 +203,8 @@ finalizeSessionOutcome: () => ({
 			}),
 				recoverCrashLeftOutcomes: () => [],
 				drainReadyOutbox: () => [],
+			inspectStatusSnapshot: () => null,
+			pendingAnnouncements: () => [],
 		});
 
 		await core.sessionStart({ cwd: project, reason: "startup", sessionId: null });
@@ -240,7 +245,7 @@ finalizeSessionOutcome: () => ({
 
 	test("different workspaces do not suppress an identical Recall hash", async () => {
 		const first = await recall([success(1, "same lesson")]);
-		const delivered = first[0]?.details;
+		const delivered = (first[0] as MessageEffect | undefined)?.details;
 		const core = coordinator([success(1, "same lesson")], "workspace-2");
 		await core.sessionStart({ cwd: "/workspace", reason: "fork", sessionId: null });
 
@@ -274,6 +279,8 @@ finalizeSessionOutcome: () => ({
 			}),
 				recoverCrashLeftOutcomes: () => [],
 				drainReadyOutbox: () => [],
+			inspectStatusSnapshot: () => null,
+			pendingAnnouncements: () => [],
 		});
 		await nonGitCore.sessionStart({ cwd: sandbox, reason: "startup", sessionId: null });
 		expect(

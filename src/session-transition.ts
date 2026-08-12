@@ -22,6 +22,7 @@ import type { OutcomeEntry } from "./filter";
 import type { GraphRecorder } from "./graph-recorder";
 export type { GraphRecordResult, GraphRecordCode } from "./graph-recorder";
 export type { GraphRecorder };
+import { prefix, previewLesson, deriveHealth, type StatusSnapshot } from "./status";
 
 export type OutcomeVerdict = "success" | "failed";
 export type OutcomeSource = "tool:evolver_outcome" | "command:evolver-outcome";
@@ -109,6 +110,27 @@ export interface SessionTransitionStore {
 	): FinalizationResult;
 	drainOutbox(workspaceId: string, graphPath: string): FinalizationResult[];
 	recoverCrashLeft(cwd: string, workspaceId: string, graphPath: string): FinalizationResult[];
+	recordResult(
+		workspaceId: string,
+		result: FinalizationResult,
+		identity: { diffHash: string; source: string } | null,
+		timestamp: string,
+	): void;
+	readResults(workspaceId: string): ResultSlots;
+	pendingAnnouncements(workspaceId: string): FinalizationRecord[];
+	inspectStatus(cwd: string, workspaceId: string, sessionId: string, graphPath: string): StatusSnapshot | null;
+}
+
+export interface FinalizationRecord {
+	code: FinalizationCode;
+	timestamp: string;
+	identity: { diffHash: string; source: string } | null;
+	announced: boolean;
+}
+
+export interface ResultSlots {
+	lastAttempt: FinalizationRecord | null;
+	lastRecorded: FinalizationRecord | null;
 }
 
 const ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/;
@@ -368,6 +390,111 @@ function listCrashLeftSessions(workspaceId: string): { path: string; state: Sess
 	return out;
 }
 
+function resultsPath(workspaceId: string): string | null {
+	if (!WORKSPACE_PATTERN.test(workspaceId)) return null;
+	return join(stateRoot(), "results", `${workspaceId}.json`);
+}
+
+function readResultSlots(path: string): ResultSlots {
+	const empty: ResultSlots = { lastAttempt: null, lastRecorded: null };
+	try {
+		if (lstatSync(path).isSymbolicLink()) return empty;
+		const stat = statSync(path);
+		if (!stat.isFile() || stat.mode & 0o077) return empty;
+		const value = JSON.parse(readFileSync(path, "utf8")) as Partial<ResultSlots>;
+		return {
+			lastAttempt: value.lastAttempt ?? null,
+			lastRecorded: value.lastRecorded ?? null,
+		};
+	} catch {
+		return empty;
+	}
+}
+
+function writeResultSlots(path: string, slots: ResultSlots): void {
+	writeState(path, slots);
+}
+
+/** Read-only Graph inspection: counts entries without acquiring the lock. */
+function inspectGraph(graphPath: string, workspaceId: string): {
+	path: string;
+	health: "ok" | "missing" | "readonly" | "malformed" | "unavailable";
+	totalCount: number;
+	workspaceCount: number;
+	malformedCount: number;
+	lockState: "free" | "busy" | "stale" | "unavailable";
+} {
+	let content: string;
+	try {
+		content = readFileSync(graphPath, "utf8");
+	} catch {
+		// Missing Graph whose parent is writable is a normal "missing" state.
+		return { path: graphPath, health: "missing", totalCount: 0, workspaceCount: 0, malformedCount: 0, lockState: lockStateOf(`${graphPath}.lock`) };
+	}
+	let total = 0;
+	let workspace = 0;
+	let malformed = 0;
+	for (const line of content.split("\n")) {
+		const trimmed = line.trim();
+		if (!trimmed) continue;
+		try {
+			const entry = JSON.parse(trimmed) as OutcomeEntry;
+			total += 1;
+			if (entry.workspace_id === workspaceId) {
+				workspace += 1;
+			}
+		} catch {
+			malformed += 1;
+		}
+	}
+	const lockState = lockStateOf(`${graphPath}.lock`);
+	return { path: graphPath, health: malformed > 0 ? "malformed" : "ok", totalCount: total, workspaceCount: workspace, malformedCount: malformed, lockState };
+}
+
+function lockStateOf(lockPath: string): "free" | "busy" | "stale" | "unavailable" {
+	try {
+		const stat = statSync(lockPath);
+		// A lock older than the deadline is considered abandoned (stale).
+		if (Date.now() - stat.mtimeMs > 5_000) return "stale";
+		return "busy";
+	} catch (err) {
+		const code = (err as NodeJS.ErrnoException).code;
+		if (code === "ENOENT") return "free";
+		return "unavailable";
+	}
+}
+
+function persistResult(
+	workspaceId: string,
+	result: FinalizationResult,
+	identity: { diffHash: string; source: string } | null,
+	timestamp: string,
+): void {
+	const path = resultsPath(workspaceId);
+	if (!path) return;
+	const slots = readResultSlots(path);
+	const prev = slots.lastAttempt;
+	// A repeated retry for the same ready identity and same result code must not
+	// re-announce or erase the announced flag.
+	const sameState =
+		prev &&
+		prev.code === result.code &&
+		prev.identity?.diffHash === identity?.diffHash;
+	const announced = sameState ? prev.announced : false;
+	const record: FinalizationRecord = {
+		code: result.code,
+		timestamp,
+		identity,
+		announced,
+	};
+	slots.lastAttempt = record;
+	// A duplicate or skip never erases the last actually-appended record.
+	if (result.code === "recorded" || result.code === "duplicate") {
+		slots.lastRecorded = { ...record };
+	}
+	writeResultSlots(path, slots);
+}
+
 export function createSessionTransitionStore(
 	recorder: GraphRecorder,
 ): SessionTransitionStore {
@@ -446,61 +573,78 @@ export function createSessionTransitionStore(
 
 		finalize(cwd, workspaceId, sessionId, graphPath) {
 			const path = statePath(workspaceId, sessionId);
-			if (!path) return finalizeResult("unavailable");
+			const now = () => new Date().toISOString();
+			const finish = (
+				code: FinalizationCode,
+				identity: { diffHash: string; source: string } | null,
+			): FinalizationResult => {
+				persistResult(workspaceId, finalizeResult(code), identity, now());
+				return finalizeResult(code);
+			};
+			if (!path) return finish("unavailable", null);
 			const state = matchingState(path, workspaceId, sessionId);
-			if (!state) return finalizeResult("unavailable");
+			if (!state) return finish("unavailable", null);
 			const pending = state.pending;
 			if (!pending) {
 				const current = captureWorkspaceSnapshot(cwd);
 				if (current && current.hash === state.baseline.hash) {
-					return finalizeResult("skipped_no_changes");
+					return finish("skipped_no_changes", null);
 				}
-				return finalizeResult("skipped_no_verdict");
+				return finish("skipped_no_verdict", null);
 			}
 			const current = captureWorkspaceSnapshot(cwd);
-			if (!current) return finalizeResult("unavailable");
+			if (!current) return finish("unavailable", null);
+			const identity = {
+				diffHash: transitionHash(state.baseline, pending.endSnapshot),
+				source: pending.source,
+			};
 			if (current.hash !== pending.endSnapshot.hash) {
-				return finalizeResult("stale");
+				return finish("stale", identity);
 			}
 			if (current.hash === state.baseline.hash) {
-				return finalizeResult("skipped_no_changes");
+				return finish("skipped_no_changes", identity);
 			}
-		const record = buildRecord(cwd, workspaceId, sessionId, state, pending);
-		const readyPath = outboxPath(workspaceId, record.diff_hash as string);
-		if (readyPath && !writeReadyRecord(readyPath, record)) {
-			return finalizeResult("error");
-		}
-		// Pending is settled once the Ready item is durable.
-		delete state.pending;
-		if (!writeState(path, state)) return finalizeResult("error");
-		let recorded;
-		try {
-			recorded = recorder.record(graphPath, record);
-		} catch {
-			// A transient throw leaves the Ready item in place for a later retry.
-			return finalizeResult("queued");
-		}
-		if (recorded.code === "recorded" || recorded.code === "duplicate") {
-			if (readyPath) removeReadyRecord(readyPath);
-			return finalizeResult(recorded.code);
-		}
-		// Lock contention or I/O failure: keep the Ready item for later retry.
-		return finalizeResult("queued");
+			const record = buildRecord(cwd, workspaceId, sessionId, state, pending);
+			const readyPath = outboxPath(workspaceId, record.diff_hash as string);
+			if (readyPath && !writeReadyRecord(readyPath, record)) {
+				return finish("error", identity);
+			}
+			delete state.pending;
+			if (!writeState(path, state)) return finish("error", identity);
+			let recorded;
+			try {
+				recorded = recorder.record(graphPath, record);
+			} catch {
+				return finish("queued", identity);
+			}
+			if (recorded.code === "recorded" || recorded.code === "duplicate") {
+				if (readyPath) removeReadyRecord(readyPath);
+				return finish(recorded.code, identity);
+			}
+			return finish("queued", identity);
 		},
 
 		drainOutbox(workspaceId, graphPath) {
 			const results: FinalizationResult[] = [];
+			const now = () => new Date().toISOString();
 			for (const { path, record } of listReadyRecords(workspaceId)) {
+				const identity = {
+					diffHash: record.diff_hash as string,
+					source: (record.source as string) ?? "tool:evolver_outcome",
+				};
 				try {
 					const recorded = recorder.record(graphPath, record);
 					if (recorded.code === "recorded" || recorded.code === "duplicate") {
 						removeReadyRecord(path);
+						persistResult(workspaceId, finalizeResult(recorded.code), identity, now());
 						results.push(finalizeResult(recorded.code));
 					} else {
+						persistResult(workspaceId, finalizeResult("queued"), identity, now());
 						results.push(finalizeResult("queued"));
 					}
 				} catch {
-				results.push(finalizeResult("queued"));
+					persistResult(workspaceId, finalizeResult("queued"), identity, now());
+					results.push(finalizeResult("queued"));
 				}
 			}
 			return results;
@@ -508,31 +652,39 @@ export function createSessionTransitionStore(
 
 		recoverCrashLeft(cwd, workspaceId, graphPath) {
 			const results: FinalizationResult[] = [];
+			const now = () => new Date().toISOString();
 			for (const { path, state } of listCrashLeftSessions(workspaceId)) {
 				const pending = state.pending;
 				if (!pending) continue;
 				const current = captureWorkspaceSnapshot(cwd);
+				const identity = {
+					diffHash: transitionHash(state.baseline, pending.endSnapshot),
+					source: pending.source,
+				};
 				if (!current || current.hash !== pending.endSnapshot.hash) {
-					// The submitted snapshot no longer matches reality — mark stale and settle.
 					delete state.pending;
 					writeState(path, state);
+					persistResult(workspaceId, finalizeResult("stale"), identity, now());
 					results.push(finalizeResult("stale"));
 					continue;
 				}
 				if (current.hash === state.baseline.hash) {
 					delete state.pending;
 					writeState(path, state);
+					persistResult(workspaceId, finalizeResult("skipped_no_changes"), identity, now());
 					results.push(finalizeResult("skipped_no_changes"));
 					continue;
 				}
 				const record = buildRecord(cwd, workspaceId, state.sessionId, state, pending);
-			const readyPath = outboxPath(workspaceId, record.diff_hash as string);
-			if (readyPath && !writeReadyRecord(readyPath, record)) {
-				results.push(finalizeResult("error"));
-				continue;
-			}
+				const readyPath = outboxPath(workspaceId, record.diff_hash as string);
+				if (readyPath && !writeReadyRecord(readyPath, record)) {
+					persistResult(workspaceId, finalizeResult("error"), identity, now());
+					results.push(finalizeResult("error"));
+					continue;
+				}
 				delete state.pending;
 				if (!writeState(path, state)) {
+					persistResult(workspaceId, finalizeResult("error"), identity, now());
 					results.push(finalizeResult("error"));
 					continue;
 				}
@@ -540,15 +692,110 @@ export function createSessionTransitionStore(
 					const recorded = recorder.record(graphPath, record);
 					if (recorded.code === "recorded" || recorded.code === "duplicate") {
 						if (readyPath) removeReadyRecord(readyPath);
+						persistResult(workspaceId, finalizeResult(recorded.code), identity, now());
 						results.push(finalizeResult(recorded.code));
 					} else {
+						persistResult(workspaceId, finalizeResult("queued"), identity, now());
 						results.push(finalizeResult("queued"));
 					}
 				} catch {
-					results.push(finalizeResult("error"));
+					persistResult(workspaceId, finalizeResult("queued"), identity, now());
+					results.push(finalizeResult("queued"));
 				}
 			}
 			return results;
+		},
+		recordResult(workspaceId, result, identity, timestamp) {
+			persistResult(workspaceId, result, identity, timestamp);
+		},
+
+		readResults(workspaceId) {
+			const path = resultsPath(workspaceId);
+			if (!path) return { lastAttempt: null, lastRecorded: null };
+			return readResultSlots(path);
+		},
+
+		pendingAnnouncements(workspaceId) {
+			const path = resultsPath(workspaceId);
+			if (!path) return [];
+			const slots = readResultSlots(path);
+			const announcements: FinalizationRecord[] = [];
+			const silent = new Set(["skipped_no_verdict", "skipped_no_changes"]);
+			if (slots.lastAttempt && !silent.has(slots.lastAttempt.code) && !slots.lastAttempt.announced) {
+				announcements.push(slots.lastAttempt);
+				slots.lastAttempt.announced = true;
+				writeResultSlots(path, slots);
+			}
+			return announcements;
+		},
+
+		inspectStatus(cwd, workspaceId, sessionId, graphPath) {
+			const sessionStatePath = statePath(workspaceId, sessionId);
+			const state = sessionStatePath ? matchingState(sessionStatePath, workspaceId, sessionId) : null;
+			const graph = inspectGraph(graphPath, workspaceId);
+			const results = readResultSlots(resultsPath(workspaceId) ?? "");
+		const current = state ? captureWorkspaceSnapshot(cwd) : null;
+		const pendingPreview = state?.pending ? previewLesson(state.pending.lesson) : null;
+			const transitionHashPrefix = state?.pending
+				? prefix(transitionHash(state.baseline, state.pending.endSnapshot))
+				: state
+					? prefix(state.baseline.hash)
+					: null;
+			const pendingSection = state?.pending
+				? {
+						verdict: state.pending.verdict,
+						source: state.pending.source,
+						submittedAt: state.pending.submittedAt,
+					snapshotMatches: current ? current.hash === state.pending.endSnapshot.hash : false,
+					lessonPreview: pendingPreview?.preview ?? "",
+					lessonOriginalLength: pendingPreview?.originalLength ?? 0,
+					}
+				: null;
+			const snapshot: Omit<StatusSnapshot, "overallHealth"> = {
+				workspace: {
+					root: null,
+					gitHealth: state ? "ok" : "unavailable",
+					workspaceIdPrefix: prefix(workspaceId),
+					sessionIdPrefix: prefix(sessionId),
+					recordingReady: state !== null,
+					disabledReason: state ? null : "no session transition",
+				},
+				graph,
+				session: state
+					? {
+							baselinePrefix: prefix(state.baseline.hash),
+							currentPrefix: current ? prefix(current.hash) : null,
+							changed: current ? state.baseline.hash !== current.hash : false,
+							transitionHashPrefix,
+							graphContainsIdentity: graph.workspaceCount > 0,
+							signals: state.signals,
+							readyOutboxCount: listReadyRecords(workspaceId).length,
+						}
+					: null,
+				pending: pendingSection,
+				recall: null,
+				lastAttempt: results.lastAttempt
+					? {
+							code: results.lastAttempt.code,
+							timestamp: results.lastAttempt.timestamp,
+							identityPrefix: results.lastAttempt.identity
+								? prefix(results.lastAttempt.identity.diffHash)
+								: null,
+							source: results.lastAttempt.identity?.source ?? null,
+						}
+					: null,
+				lastRecorded: results.lastRecorded
+					? {
+							code: results.lastRecorded.code,
+							timestamp: results.lastRecorded.timestamp,
+							identityPrefix: results.lastRecorded.identity
+								? prefix(results.lastRecorded.identity.diffHash)
+								: null,
+							source: results.lastRecorded.identity?.source ?? null,
+						}
+					: null,
+			};
+			return { ...snapshot, overallHealth: deriveHealth(snapshot) };
 		},
 	};
 }

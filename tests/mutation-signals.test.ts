@@ -22,6 +22,8 @@ function createDependencies(
 		finalizeSessionOutcome: () => ({ code: "unavailable" as const, receipt: "Outcome finalization is unavailable." }),
 		recoverCrashLeftOutcomes: () => [],
 		drainReadyOutbox: () => [],
+		inspectStatusSnapshot: () => null,
+		pendingAnnouncements: () => [],
 	};
 }
 

@@ -11,6 +11,7 @@ import type {
 	SessionShutdownReason,
 	SessionStartReason,
 } from "./core-coordinator";
+import { renderStatus } from "./status";
 
 const OutcomeParameters = Type.Object(
 	{
@@ -70,6 +71,7 @@ function toPiMessage(effect: MessageEffect) {
 
 function applyEffects(pi: ExtensionAPI, effects: CoordinatorEffect[]): void {
 	for (const effect of effects) {
+		if (effect.type !== "message") continue;
 		if (effect.deliverAs !== "steer") continue;
 		pi.sendMessage(toPiMessage(effect), { deliverAs: "steer" });
 	}
@@ -160,6 +162,29 @@ export function registerPiAdapter(
 			}
 		},
 	});
+	pi.registerCommand("evolver-status", {
+		description: "Show the read-only evolution status snapshot",
+		async handler(_args, ctx) {
+			try {
+				const result = await coordinator.inspectStatus({
+					cwd: ctx.cwd,
+					sessionId: ctx.sessionManager.getSessionId?.() ?? null,
+				});
+				const lines = result.snapshot
+					? renderStatus(result.snapshot)
+					: [`Evolver status: unavailable — ${result.reason}`];
+				ctx.ui.setWidget("evolver-status", lines, { placement: "belowEditor" });
+			} catch {
+				try {
+					ctx.ui.setWidget("evolver-status", ["Evolver status: unavailable"], {
+						placement: "belowEditor",
+					});
+				} catch {
+					// fail open — the widget is best-effort
+				}
+			}
+		},
+	});
 	pi.on("session_start", async (event, ctx) => {
 		try {
 			const effects = await coordinator.sessionStart({
@@ -167,7 +192,15 @@ export function registerPiAdapter(
 				reason: event.reason as SessionStartReason,
 				sessionId: ctx.sessionManager.getSessionId?.() ?? null,
 			});
-			applyEffects(pi, effects);
+		for (const effect of effects) {
+			if (effect.type === "announcement") {
+				try {
+					ctx.ui.notify(effect.content, "info");
+				} catch {
+					// fail open — announcements are best-effort
+				}
+			}
+		}
 		} catch (_err) {
 			// fail open — evolution memory is optional
 		}
@@ -180,10 +213,11 @@ export function registerPiAdapter(
 				deliveredRecalls: deliveredRecalls(ctx.sessionManager.getBranch()),
 			});
 			applyEffects(pi, effects);
-			const recall = effects.find(
-				(effect) => effect.deliverAs === "currentTurn",
-			);
-			return recall ? { message: toPiMessage(recall) } : undefined;
+		const recall = effects.find(
+			(effect): effect is MessageEffect =>
+				effect.type === "message" && effect.deliverAs === "currentTurn",
+		);
+		return recall ? { message: toPiMessage(recall) } : undefined;
 		} catch (_err) {
 			// fail open — Recall preparation is optional
 		}
@@ -214,6 +248,23 @@ export function registerPiAdapter(
 			applyEffects(pi, effects);
 		} catch (_err) {
 			// fail open — outcome recording is optional
+		}
+		try {
+			ctx.ui.setWidget("evolver-status", undefined, { placement: "belowEditor" });
+		} catch {
+			// fail open — widget clearing is best-effort
+		}
+	});
+
+	pi.on("input", async (event, ctx) => {
+		// Clear the status widget on the next non-status input.
+		if (typeof event.text === "string" && event.text.trim().startsWith("/evolver-status")) {
+			return;
+		}
+		try {
+			ctx.ui.setWidget("evolver-status", undefined, { placement: "belowEditor" });
+		} catch {
+			// fail open — widget clearing is best-effort
 		}
 	});
 

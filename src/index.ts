@@ -7,6 +7,7 @@ import { createCoreCoordinator } from "./core-coordinator";
 import { createGraphRecorder } from "./graph-recorder";
 import { loadRecall } from "./recall";
 import { findMemoryGraph } from "./paths";
+import { prefix } from "./status";
 import { registerPiAdapter } from "./pi-adapter";
 import { resolveWorkspaceId } from "./paths";
 import { createSessionTransitionStore } from "./session-transition";
@@ -33,6 +34,12 @@ export default function (pi: ExtensionAPI): void {
 			transitions.recoverCrashLeft(cwd, workspaceId, findMemoryGraph(cwd)),
 		drainReadyOutbox: (cwd, workspaceId) =>
 			transitions.drainOutbox(workspaceId, findMemoryGraph(cwd)),
+		inspectStatusSnapshot: (cwd, workspaceId, sessionId) =>
+			transitions.inspectStatus(cwd, workspaceId, sessionId, findMemoryGraph(cwd)),
+		pendingAnnouncements: (workspaceId) =>
+			transitions.pendingAnnouncements(workspaceId).map(
+				(r) => `${r.code} — ${r.identity?.source ?? "evolver"} (${r.identity ? prefix(r.identity.diffHash) : "—"})`,
+			),
 	});
 	registerPiAdapter(pi, coordinator, join(__dirname, "..", "skills"));
 }

@@ -64,6 +64,10 @@ function coordinator() {
 			store.recoverCrashLeft(cwd, workspaceId, findMemoryGraph(cwd)),
 		drainReadyOutbox: (cwd, workspaceId) =>
 			store.drainOutbox(workspaceId, findMemoryGraph(cwd)),
+		inspectStatusSnapshot: (cwd, workspaceId, sessionId) =>
+			store.inspectStatus(cwd, workspaceId, sessionId, findMemoryGraph(cwd)),
+		pendingAnnouncements: (workspaceId) =>
+			store.pendingAnnouncements(workspaceId).map((r) => r.code),
 	};
 	return createCoreCoordinator(dependencies);
 }
@@ -318,6 +322,8 @@ describe("Pending Outcome contract", () => {
 		finalizeSessionOutcome: () => unavailable,
 			recoverCrashLeftOutcomes: () => [],
 			drainReadyOutbox: () => [],
+		inspectStatusSnapshot: () => null,
+			pendingAnnouncements: () => [],
 		});
 
 		expect(
