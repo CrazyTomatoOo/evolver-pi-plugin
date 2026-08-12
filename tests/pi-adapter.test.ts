@@ -103,7 +103,19 @@ describe("Pi Adapter", () => {
 			{ cwd: "/workspace" },
 		);
 		await harness.handlers.get("tool_result")?.(
-			{ toolName: "write", input: { path: "README.md", content: "text" } },
+			{
+				toolName: "write",
+				input: { path: "README.md", content: "text" },
+				isError: false,
+			},
+			{ cwd: "/workspace" },
+		);
+		await harness.handlers.get("tool_result")?.(
+			{
+				toolName: "edit",
+				input: { path: "README.md", edits: [] },
+				isError: true,
+			},
 			{ cwd: "/workspace" },
 		);
 		await harness.handlers.get("session_shutdown")?.(
@@ -123,6 +135,12 @@ describe("Pi Adapter", () => {
 			{
 				toolName: "write",
 				input: { path: "README.md", content: "text" },
+				isError: false,
+			},
+			{
+				toolName: "edit",
+				input: { path: "README.md", edits: [] },
+				isError: true,
 			},
 		]);
 		expect(shutdowns).toEqual([

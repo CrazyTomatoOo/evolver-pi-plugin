@@ -7,18 +7,15 @@ import assert from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execSync } from "node:child_process";
 import { detectSignals } from "../src/signals";
 import { filterRelevant, type OutcomeEntry } from "../src/filter";
 import { resolveWorkspaceId } from "../src/paths";
 import { appendEntry, gatherWorkspaceEntries } from "../src/memory";
 import { buildRecallText } from "../src/recall";
-import { recordOutcome } from "../src/record";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "evolver-selfcheck-"));
 // Keep all state in the temp sandbox, away from the real ~/.evolver.
 process.env.EVOLVER_SESSION_STATE_DIR = path.join(tmp, "state");
-process.env.EVOLVER_HOOK_LOG_DIR = path.join(tmp, "logs");
 
 let passed = 0;
 function check(name: string, fn: () => void | Promise<void>): Promise<void> {
@@ -100,14 +97,14 @@ async function main() {
 		const entry: OutcomeEntry = {
 			timestamp: new Date().toISOString(),
 			gene_id: "ad_hoc",
-			signals: ["stable_success_plateau"],
+			signals: ["capability_gap"],
 			outcome: { status: "success", score: 0.8, note: "did the thing" },
 			cwd: proj,
 			workspace_id: wsId,
 			session_id: "sess-1",
 			diff_hash: "h",
 			diff_scope: "working_tree",
-			source: "hook:session-end",
+			source: "tool:evolver_outcome",
 		};
 		assert.ok(appendEntry(graph, entry));
 		const gathered = gatherWorkspaceEntries(graph, wsId, proj);
@@ -118,47 +115,6 @@ async function main() {
 		delete process.env.MEMORY_GRAPH_PATH;
 	});
 
-	await check(
-		"recordOutcome classifies a real git diff into the graph",
-		async () => {
-			const repo = path.join(tmp, "repo");
-			fs.mkdirSync(repo, { recursive: true });
-			const sh = (cmd: string): void => {
-				try {
-					execSync(cmd, { cwd: repo, stdio: "ignore" });
-				} catch (err) {
-					throw new Error(`git step failed: ${cmd}: ${(err as Error).message}`);
-				}
-			};
-			sh("git init -q");
-			sh("git config user.email t@t.t");
-			sh("git config user.name t");
-			fs.writeFileSync(path.join(repo, "a.txt"), "hello\n");
-			sh("git add -A");
-			sh("git commit -qm init");
-			// Introduce a working-tree change that mentions an error signal.
-			fs.writeFileSync(path.join(repo, "a.txt"), "hello\nerror: it failed\n");
-
-			const graph = path.join(tmp, "repo-graph.jsonl");
-			process.env.MEMORY_GRAPH_PATH = graph;
-			const receipt = await recordOutcome(repo, "sess-repo");
-			assert.ok(receipt, "expected a receipt");
-			const lines = fs.readFileSync(graph, "utf8").trim().split("\n");
-			let rec: OutcomeEntry;
-			try {
-				rec = JSON.parse(lines[lines.length - 1]) as OutcomeEntry;
-			} catch (err) {
-				throw new Error(`bad graph json: ${(err as Error).message}`);
-			}
-			assert.strictEqual(rec.outcome?.status, "failed"); // log_error present
-			assert.strictEqual(rec.outcome?.score, 0.3);
-			assert.ok(rec.signals?.includes("log_error"));
-			assert.strictEqual(rec.source, "hook:session-end");
-			assert.strictEqual(rec.diff_scope, "working_tree");
-			assert.ok(rec.workspace_id && /^[a-f0-9]{32}$/i.test(rec.workspace_id));
-			delete process.env.MEMORY_GRAPH_PATH;
-		},
-	);
 
 	console.log(`\n${passed} checks passed.`);
 }

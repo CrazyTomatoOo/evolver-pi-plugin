@@ -51,6 +51,7 @@ export function registerPiAdapter(
 		try {
 			const effects = await coordinator.mutationResult({
 				toolName: event.toolName,
+				isError: event.isError,
 				input: (event.input ?? {}) as Record<string, unknown>,
 			});
 			applyEffects(pi, effects);

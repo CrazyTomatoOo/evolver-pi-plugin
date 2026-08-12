@@ -28,6 +28,10 @@ describe("Local-only runtime contract", () => {
 				"Session-end TTL",
 				/SESSION_END_.*TTL|EVOLVER_SESSION_END_DEDUPE_TTL_MS|session-end-state/i,
 			],
+			[
+				"automatic Outcome classification",
+				/stable_success_plateau|recordOutcome|hook:session-end/i,
+			],
 		];
 
 		for (const [name, pattern] of forbidden) {
@@ -40,7 +44,6 @@ describe("Local-only runtime contract", () => {
 			.map((match) => match[1])
 			.sort((left, right) => left.localeCompare(right));
 		expect([...new Set(environmentVariables)]).toEqual([
-			"EVOLVER_HOOK_LOG_DIR",
 			"EVOLVER_SESSION_STATE_DIR",
 			"EVOLVER_WORKSPACE_ID",
 			"MEMORY_GRAPH_PATH",

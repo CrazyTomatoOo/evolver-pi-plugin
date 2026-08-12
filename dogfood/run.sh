@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Dogfood the evolver pi plugin inside the container: drive a real pi session
-# against a mock model and assert all three automatic behaviors fire.
+# against a mock model and assert Recall, mutation signals, and no automatic Outcome.
 set -uo pipefail
 
 MOCK_PORT=18999
@@ -32,15 +32,14 @@ mkdir -p "$HOME/.pi/agent"
 [ -f "$SETTINGS" ] || echo '{}' >"$SETTINGS"
 jq '. + {defaultProvider:"mock", defaultModel:"mock-model"}' "$SETTINGS" >"$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
 
-echo "== prepare test git repo with a working-tree diff =="
+echo "== prepare clean test git repo =="
 rm -rf /work/testrepo && mkdir -p /work/testrepo && cd /work/testrepo
 git init -q && git config user.email t@t.t && git config user.name t
 echo "hello" >a.txt && git add -A && git commit -qm init
-echo "change" >>a.txt # working-tree change so session-end has a diff to classify
 
 echo "== seed a recent successful outcome so recall has something to inject =="
 mkdir -p "$(dirname "$EVOLVER_GRAPH")"
-printf '%s\n' "{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\",\"gene_id\":\"ad_hoc\",\"signals\":[\"stable_success_plateau\"],\"outcome\":{\"status\":\"success\",\"score\":0.8,\"note\":\"seeded prior success for recall\"},\"cwd\":\"/work/testrepo\",\"workspace_id\":\"$WSID\",\"session_id\":\"seed\",\"diff_hash\":\"seed\",\"diff_scope\":\"working_tree\",\"source\":\"hook:session-end\"}" >"$EVOLVER_GRAPH"
+printf '%s\n' "{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\",\"gene_id\":\"ad_hoc\",\"signals\":[\"capability_gap\"],\"outcome\":{\"status\":\"success\",\"score\":0.8,\"note\":\"seeded prior success for recall\"},\"cwd\":\"/work/testrepo\",\"workspace_id\":\"$WSID\",\"session_id\":\"seed\",\"diff_hash\":\"seed\",\"diff_scope\":\"working_tree\",\"source\":\"tool:evolver_outcome\"}" >"$EVOLVER_GRAPH"
 SEED_LINES=$(wc -l <"$EVOLVER_GRAPH" | tr -d ' ')
 echo "seeded $SEED_LINES outcome(s)"
 
@@ -55,9 +54,7 @@ check "recall injected (Evolution Memory present)" "grep -rql 'Evolution Memory'
 check "signal detected on the write (Evolution Signal present)" "grep -rql 'Evolution Signal' /tmp/out.json \"$HOME/.pi\" 2>/dev/null"
 check "write tool produced dogfood.txt" "test -f /work/testrepo/dogfood.txt"
 NEW_LINES=$(wc -l <"$EVOLVER_GRAPH" | tr -d ' ')
-check "session-end recorded a NEW outcome ($SEED_LINES -> $NEW_LINES)" "test \"$NEW_LINES\" -gt \"$SEED_LINES\""
-HOOK_COUNT=$(grep -c 'hook:session-end' "$EVOLVER_GRAPH")
-check "recorded outcome sourced from hook:session-end (count=$HOOK_COUNT > 1)" "test '$HOOK_COUNT' -gt 1"
+check "session end did not fabricate an Outcome ($SEED_LINES -> $NEW_LINES)" "test \"$NEW_LINES\" -eq \"$SEED_LINES\""
 
 echo
 echo "== result: $PASS passed, $FAIL failed =="

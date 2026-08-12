@@ -10,7 +10,6 @@ function createDependencies(
 	return {
 		buildRecallText: () => null,
 		detectSignals: () => [],
-		recordOutcome: async () => null,
 		...overrides,
 	};
 }
@@ -50,6 +49,7 @@ describe("Core Coordinator", () => {
 
 		const effects = await coordinator.mutationResult({
 			toolName: "write",
+			isError: false,
 			input: { path: "src/example.ts", content: "fixed a regression" },
 		});
 
@@ -65,29 +65,23 @@ describe("Core Coordinator", () => {
 		]);
 	});
 
-	test("records only the existing quit shutdown boundary", async () => {
-		const recorded: Array<[string, string | null]> = [];
-		const coordinator = createCoreCoordinator(
-			createDependencies({
-				recordOutcome: async (cwd, sessionId) => {
-					recorded.push([cwd, sessionId]);
-					return "recorded";
-				},
+	test("never classifies or records an Outcome automatically at shutdown", async () => {
+		const coordinator = createCoreCoordinator(createDependencies());
+
+		expect(
+			await coordinator.sessionShutdown({
+				cwd: "/workspace",
+				reason: "reload",
+				sessionId: "session-1",
 			}),
-		);
-
-		await coordinator.sessionShutdown({
-			cwd: "/workspace",
-			reason: "reload",
-			sessionId: "session-1",
-		});
-		await coordinator.sessionShutdown({
-			cwd: "/workspace",
-			reason: "quit",
-			sessionId: "session-1",
-		});
-
-		expect(recorded).toEqual([["/workspace", "session-1"]]);
+		).toEqual([]);
+		expect(
+			await coordinator.sessionShutdown({
+				cwd: "/workspace",
+				reason: "quit",
+				sessionId: "session-1",
+			}),
+		).toEqual([]);
 	});
 
 	test("exposes future lifecycle seams without loading Pi", async () => {
